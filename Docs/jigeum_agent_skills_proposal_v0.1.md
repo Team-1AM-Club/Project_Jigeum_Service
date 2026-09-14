@@ -1,11 +1,16 @@
-# 지금(가칭) — Agent & Skills 제안서
+# 지금(가칭) — MCP 서비스 Agent & Skills 제안서
 
-- **문서 버전:** v0.1
+- **문서 버전:** v0.2 — MCP 제공 방향 반영 (파일명 유지)
+- **개정일:** 2026-09-14
 - **작성일:** 2026-08-24
 - **문서 목적:** `지금` 서비스에서 Agent를 어디에 적용하는 것이 타당한지, Agent가 어떤 책임을 가져야 하는지, 그리고 이를 지원하기 위해 어떤 Skills를 설계할 수 있는지 개략적으로 제안한다.
 - **범위:** 상세 구현, Prompt, Framework, Tool Schema, Model 선정은 본 문서의 범위에서 제외한다.
 
 ---
+
+> **현재 서비스 개발 방향 — 2026-09-14:** 지금은 **MCP로 제공하는 서비스**다. 별도 제품 화면·설치형 클라이언트를 개발하지 않는다. 본인은 MCP 도구·Hermes 연결·확인/선택 흐름·시연을, 친구는 FastAPI·서비스 Agent·교통 데이터·계산·배포를 담당한다. Hermes + Solar Pro4는 개발·시연용 MCP 클라이언트다. 현재 구현 범위와 완료 기준은 IDEA.md를 따른다.
+
+본 문서의 Domain Skill 이름은 내부 책임의 설계 명칭이며 실제 구현된 SKILL.md나 외부 MCP 도구 목록을 뜻하지 않는다. 실제 Skill 원본은 .hermes/skills, 역할은 agent_specs, 현재 구현 범위는 IDEA.md를 따른다. Calendar·GPS·자동 감시·알림·택시 최적화는 후속 기능이다.
 
 ## 1. 제안 요약
 
@@ -15,52 +20,36 @@
 
 따라서 Agent는 다음 역할에 집중하는 것이 타당하다.
 
-> **사용자의 자연어·Calendar·현재 Journey 상태를 이해하고, 필요한 Domain Skill을 호출해 다음 행동을 Orchestration하며, 결과를 사용자에게 이해하기 쉽게 설명하는 역할**
+> **사용자가 확인한 이동 조건과 현재 선택 계획을 바탕으로 필요한 SubAgent·Skill·코드 도구를 조정하고, 검증된 결과를 MCP를 통해 전달하는 역할**
 
 즉 Agent는 "교통 알고리즘 자체"가 아니라 **Orchestration / Interpretation Layer**에 가깝다.
 
 ---
 
-## 2. 권장 Agent 구조
+## 2. MCP 제공과 서비스 Agent 구조
 
-초기 MVP에서는 여러 개의 복잡한 Multi-Agent 구조보다 **1개의 Orchestrator Agent + Domain Skills** 구조를 권장한다.
+~~~text
+사용자
+  ↕ Hermes + Solar Pro4 — 입력·질문·최종 확인·후보 선택
+지금 MCP 서버 — 도구 5개·HTTP 연결·결과/오류 전달
+  ↕
+기존 FastAPI
+  ↓
+MainAgent — 요청 분류·작업 배정·결과 취합
+  ├─ TripIntakeAgent → resolve-trip-details, schedule-ready
+  ├─ DeparturePlannerAgent → leave-by, maginot-line, route-risk-checker
+  └─ RecoveryAgent → plan-b-recovery, route-risk-checker
+  ↓
+검증 가능한 도메인 코드·교통 데이터
+~~~
 
-```text
-사용자 / Calendar / App Event
-            ↓
-     Mobility Orchestrator
-            ↓
-   필요한 Skill 선택/호출
-            ↓
-┌───────────┼─────────────┐
-│           │             │
-Intent    Deadline      Routing
-Skill      Skill         Skill
-│           │             │
-└───────────┼─────────────┘
-            ↓
-       Monitoring
-          Skill
-            ↓
-       Replanning
-          Skill
-            ↓
-       결과 설명
-```
-
-장점:
-
-- 상태 추적이 단순하다.
-- Agent 간 충돌이 적다.
-- 테스트하기 쉽다.
-- 대학생 팀 규모에서 운영 가능하다.
-- 이후 필요 시 특정 Domain만 독립 Agent로 분리할 수 있다.
+Hermes는 개발·시연용 MCP 클라이언트이며 서비스 내부 MainAgent와 구분한다. MCP 계층에 같은 Agent 체계나 교통 계산을 중복 구현하지 않는다. 하나의 SubAgent가 여러 Skill을 사용할 수 있다. 이 구조는 개발용 코딩 에이전트 분업과 별개다.
 
 ---
 
 ## 3. Core Agent 제안
 
-## 3.1 Mobility Orchestrator Agent
+## 3.1 MainAgent (Mobility Orchestrator)
 
 ### 역할
 
@@ -69,9 +58,9 @@ Skill      Skill         Skill
 예:
 
 - 사용자의 자연어를 구조화할지
-- Calendar 일정 Confirmation이 필요한지
+- 이동 조건의 사용자 최종 확인이 필요한지
 - 새로운 Deadline 계산이 필요한지
-- Monitoring을 시작할지
+- 사용자 요청 재탐색을 진행할 조건이 확인됐는지
 - 기존 Journey가 깨졌을 때 Replanning을 호출할지
 - 사용자 승인 없이 진행하면 안 되는 상태인지
 
@@ -90,41 +79,29 @@ Agent는 **정의된 Skill을 호출하고 상태를 Orchestration**해야 한�
 
 ## 4. Agent가 관리할 핵심 Context
 
-Agent는 최소 다음 Context를 이해할 수 있어야 한다.
+### 현재 이동 조건
 
-### User Context
-- 자주 가는 장소
-- Arrival Preference
-- Walking Preference
-- Taxi 허용 여부
-- 선택적 Taxi 최대비용
-- Permission 상태
+- 사용자 확인 출발 기준점·목적지·날짜·Deadline
+- 도착 여유·버스/지하철 선호·적용한 기본값
+- 최종 조건 확인 상태와 해당 조건의 버전·수명
+- 필요한 정보가 남아 있는지와 질문할 항목
 
-### Journey Context
-- 출발지
-- 목적지
-- Deadline
-- Target Arrival Time
-- Recommended Leave Time
-- Current Route
-- Current Journey State
-- Replan Count
+### 계획과 데이터
 
-### Environment Context
-- 현재 시간
-- 현재 위치 또는 수동 출발지
-- Calendar Event
-- Routing 결과
-- 교통 상태 변화
-- Notification 상태
+- 현재 선택 Plan·option_id와 재탐색 비교용 요약
+- 서버 시각·교통 데이터 출처·기준시각
+- 조회된 후보·경고·지원 범위·오류·데모 여부
+- 이전 선택과 새 후보의 구분
 
-Agent가 직접 모든 값을 계산하는 것이 아니라 **Domain Service/Skill 결과를 받아 Context로 관리**한다.
+문맥·확인·선택 상태의 소유권·저장 위치·수명은 구현 전에 합의한다. 서버가 과거 대화를 영구 보존한다고 가정하지 않는다. 저장된 집 주소나 개인 선호가 없으면 필요한 최소 정보를 다시 확인한다.
+
+Agent는 Domain Service·코드 도구의 결과를 받아 Context로 다룬다. Taxi 비용·GPS 위치 스트림·Calendar·알림 상태는 해당 후속 기능을 승인해 도입하기 전까지 필수 Context가 아니다.
 
 ---
 
 ## 5. 권장 Skill 구성
 
-다음 Skills는 초기 설계에서 개별 책임으로 분리하는 것이 타당하다.
+아래는 내부 기능의 책임 분리 제안이다. 현재 핵심은 입력·장소·Deadline·경로·막차·Buffer·재탐색·설명이며, 후속 항목은 본문 제목에 표시한다. 이 목록을 외부 MCP 도구 15개로 그대로 노출하지 않는다.
 
 ---
 
@@ -152,11 +129,11 @@ Agent가 직접 모든 값을 계산하는 것이 아니라 **Domain Service/Ski
 
 ### Agent와의 관계
 
-Agent는 이 Skill 결과에서 모호성이 높으면 Confirmation UI를 요청한다.
+Agent는 미확정 필드를 구조화해 반환하고 Hermes 대화에서 필요한 확인 질문을 전달한다.
 
 ---
 
-## 5.2 `interpret_calendar_event`
+## 5.2 `interpret_calendar_event` — 후속 확장, 현재 비적용
 
 ### 목적
 
@@ -190,7 +167,7 @@ Calendar Event가 실제 이동이 필요한 일정인지 해석하고, 장소�
 
 ### 주요 기능
 
-- 저장된 장소 Mapping
+- 사용자 확인 장소 후보 Mapping. 저장된 장소가 존재한다고 가정하지 않음
 - POI 후보 반환
 - Ambiguity 표시
 - 사용자의 최종 Confirmation 반영
@@ -287,7 +264,7 @@ Appointment와 Last Journey 모두에서 사용 가능하도록 설계한다.
 
 ---
 
-## 5.9 `monitor_journey_state`
+## 5.9 `monitor_journey_state` — 후속 확장, 현재 비적용
 
 ### 목적
 
@@ -316,7 +293,7 @@ Appointment와 Last Journey 모두에서 사용 가능하도록 설계한다.
 
 ---
 
-## 5.10 `detect_departure`
+## 5.10 `detect_departure` — 후속 확장, 현재 비적용
 
 ### 목적
 
@@ -336,7 +313,7 @@ AT_ORIGIN
 
 ---
 
-## 5.11 `detect_arrival`
+## 5.11 `detect_arrival` — 후속 확장, 현재 비적용
 
 ### 목적
 
@@ -362,16 +339,16 @@ IN_TRANSIT
 
 ### 정책 연동
 
-- 자동 Replan 최대 3회
-- 3회 초과 시 사용자 Confirmation 필요
-- Route Deviation 시 자동 실행 금지
-- Route Deviation은 사용자 승인 후 Replan
+- 현재 MVP는 사용자 요청·확인 후 Replan
+- 새 후보를 반환한 뒤 사용자 선택 전에는 기존 계획에 적용하지 않음
+- 자동 감시·주기당 3회 재제시는 후속 정책이며 수동 요청 횟수 제한이 아님
+- 변경된 출발 기준점·목적지·Deadline은 다시 확인
 
 Agent는 이 정책을 임의 변경해서는 안 된다.
 
 ---
 
-## 5.13 `search_taxi_transit_hybrid`
+## 5.13 `search_taxi_transit_hybrid` — 후속 확장, 현재 비적용
 
 ### 목적
 
@@ -384,7 +361,7 @@ Agent는 이 정책을 임의 변경해서는 안 된다.
 
 ---
 
-## 5.14 `evaluate_notification`
+## 5.14 `evaluate_notification` — 후속 확장, 현재 비적용
 
 ### 목적
 
@@ -449,18 +426,18 @@ Notification Threshold는 Product Policy 기반 Rule로 관리한다.
 - Provider Failover
 - Route Normalization
 
-### Monitoring Engine
+### Monitoring Engine — 후속 확장
 - GPS Event
 - Checkpoint
 - State Transition
 - Background Job
 
-### Notification Engine
+### Notification Engine — 후속 확장
 - Push 발송
 - Notification Permission
 - Category Preference
 
-### Calendar Integration
+### Calendar Integration — 후속 확장
 - Calendar Permission
 - Event Detection
 - Conflict Detection
@@ -489,7 +466,7 @@ Agent:
 
 ---
 
-### Case B — Calendar 일정 감지
+### Case B — Calendar 일정 감지 (후속 확장)
 
 ```text
 Calendar Event
@@ -515,101 +492,57 @@ Agent:
 2. find_last_feasible_journey
 3. apply_safety_buffer
 4. calculate_leave_time
-5. Monitoring 등록
+5. 결과·근거 전달 → 사용자 후보 선택
 ```
 
 ---
 
-### Case D — Journey 실패
+### Case D — 사용자 요청 재탐색
 
-```text
-monitor_journey_state
-→ MISSED_CONNECTION
+~~~text
+사용자: 환승을 놓쳤어. 다시 찾아줘
         ↓
-replan_journey
+현재 출발 기준점·유지할 조건 확인
         ↓
-Replan Count 확인
+사용자 요청 확인 → replan_journey
         ↓
-Alternative 전달
-```
+현재 데이터로 계산한 후보·변화량
+        ↓
+사용자 후보 선택 후 적용
+~~~
 
-3회 초과:
+### Case E — 다른 경로로 이동 중인 경우
 
-```text
-MANUAL_REPLAN_REQUIRED
-→ 사용자에게 계속 찾을지 질문
-```
+사용자가 바뀐 경로를 알리면 현재 출발 기준점을 확인한다. 자동 이탈 감지나 기존 계획 교체를 수행하지 않는다. 사용자가 재탐색을 승인하면 도구를 호출하고 결과 선택을 기다린다.
 
 ---
 
-### Case E — Route 이탈
+## 8. Agent와 MCP 확인·선택 상태의 관계
 
-```text
-monitor_journey_state
-→ ROUTE_DEVIATED
-        ↓
-기존 Monitoring 중단
-        ↓
-Agent:
-"현재 위치에서 다시 계산할까요?"
-        ↓
-사용자 승인
-        ↓
-replan_journey
-```
+Agent가 확인·선택 상태를 임의로 생성하면 안 된다. 현재 흐름은 입력 부족 → 조건 요약 → 최종 확인 → 계산 결과 → 사용자 후보 선택이다. 재탐색은 사용자 요청으로 시작하며 새 결과와 적용은 별개다.
 
----
+- ready_for_plan=true는 입력 준비 상태이지 사용자 동의가 아니다.
+- 모델이 user_confirmed=true를 생성했다는 사실만으로 동의를 검증했다고 보지 않는다.
+- 확인 조건·사용자 응답·계산 요청을 결부하고 조건 변경 시 재확인한다.
+- 늦게 도착한 응답이나 새 후보가 현재 선택을 덮어쓰지 않도록 코드로 검증한다.
+- 이전 문맥을 잃으면 다시 질문하고 자동 복원을 주장하지 않는다.
 
-## 8. Agent와 App State Machine의 관계
-
-Agent가 State를 자유롭게 만들면 안 된다.
-
-Agent는 정의된 State Machine 안에서만 행동한다.
-
-예:
-
-```text
-SCHEDULED
-→ MONITORING
-→ READY_TO_LEAVE
-→ DEPARTED
-→ IN_TRANSIT
-→ ARRIVED
-```
-
-Exception:
-
-```text
-LATE_RISK
-ROUTE_AT_RISK
-MISSED_CONNECTION
-ROUTE_DEVIATED
-REPLANNING
-MANUAL_REPLAN_REQUIRED
-```
-
-Agent의 역할은:
-
-- 현재 State에 맞는 Skill 호출
-- 필요한 사용자 Confirmation 요청
-- 결과 설명
-
-State Transition 자체는 Backend Domain Logic에서 검증한다.
+공개 API의 status는 기존 ok / needs_confirmation / unavailable / error를 유지한다. 확인·선택 상태의 세부 저장 모델은 공동 합의하며, 진행 상태·영구 이력·자동 알림은 현재 범위에서 제외한다.
 
 ---
 
 ## 9. 권장 구현 우선순위
 
-### Phase 1 — Agent 없는 Core Prototype
+### Phase 1 — MCP 연결과 검증 가능한 Core
 
-먼저 Agent 없이 다음 Domain Logic이 동작해야 한다.
+먼저 Hermes의 get_capabilities → MCP → FastAPI 호출을 검증한다. 이어서 AI의 추측 없이 다음 Domain Logic이 동작해야 한다.
 
 - Route Search
 - Deadline Calculation
 - Safety Buffer
 - Last Feasible Journey
-- Monitoring State
-- Replanning
+- 사용자 확인·선택 상태
+- 사용자 요청 Replanning
 
 이 단계가 실패하면 Agent를 넣어도 제품은 성립하지 않는다.
 
@@ -621,10 +554,10 @@ State Transition 자체는 Backend Domain Logic에서 검증한다.
 
 - Natural Language Parsing
 - Place Resolution 보조
-- Calendar Interpretation
+- Calendar Interpretation은 후속 확장
 
 목표:
-사용자가 구조화된 Form을 직접 입력해야 하는 부담을 줄인다.
+사용자가 구조화 필드를 모두 직접 작성해야 하는 부담을 줄이되 최종 조건 확인은 유지한다.
 
 ---
 
@@ -650,33 +583,15 @@ State Transition 자체는 Backend Domain Logic에서 검증한다.
 
 ---
 
-## 10. Multi-Agent 확장 여부
+## 10. 서비스 Agent 범위와 개발 분업
 
-초기에는 권장하지 않는다.
+현재 기준은 MainAgent가 역할별 SubAgent를 지휘하는 구조다. 한 SubAgent가 여러 Skill을 사용할 수 있으며 매 요청마다 모든 Agent·Skill을 실행하지 않는다. 호출 횟수·전체 제한시간·실패 반환 규칙을 정한다.
 
-향후 서비스 규모가 커지면 다음처럼 분리 가능하다.
+- 본인: MCP 도구 5개, 백엔드 연결·오류 매핑, Hermes 확인/선택 흐름, 설치·시연.
+- 친구: 기존 FastAPI·MainAgent·SubAgent·Skill, 장소·교통 데이터, 코드 계산·재탐색, 테스트·배포.
+- 공동: API·MCP 계약, 실제 사용자 확인·문맥·선택 상태의 소유권과 통합 검증.
 
-### Candidate Agent
-
-- **Input Agent**
-  - 자연어 / Calendar
-
-- **Journey Planning Agent**
-  - Deadline / Route / Last Journey
-
-- **Monitoring Agent**
-  - 상태 변화 / Risk
-
-- **Recovery Agent**
-  - Replanning / Taxi Hybrid
-
-하지만 MVP에서는 Agent 간 Hand-off와 Context 동기화 비용이 제품 가치보다 클 가능성이 높다.
-
-따라서:
-
-> **MVP: Single Orchestrator + Skills**
-
-를 권장한다.
+개발용 Hermes가 도구를 호출한다는 사실과 서비스 내부 SubAgent·Skill이 실제 실행됐다는 증거를 구분한다. 별도 제품 화면 개발 역할은 없다.
 
 ---
 
@@ -718,10 +633,12 @@ requires_user_confirmation
 다음은 Agent가 자동 진행하지 않는다.
 
 - 모호한 목적지 확정
-- Calendar 일정 관리 시작
-- Route Deviation 후 Replan
-- Replan 3회 초과
-- Permission 관련 결정
+- 조건 확정 후 계획 계산
+- 변경 조건에서 재탐색
+- 새 후보를 기존 계획에 적용
+- 도구 연결 권한·개인정보 관련 결정
+
+Calendar·자동 재제시 횟수 정책은 해당 후속 기능을 도입할 때 별도로 승인받는다.
 
 ### 11.5 Observability
 
@@ -731,7 +648,7 @@ requires_user_confirmation
 
 - 어떤 Route를 선택했는가
 - 어떤 Safety Buffer가 적용됐는가
-- 왜 Notification을 보냈는가
+- 어떤 조건에 사용자가 확인했고 어떤 후보를 선택했는가
 - 왜 Replanning을 수행했는가
 
 를 Log로 남길 수 있어야 한다.
@@ -782,44 +699,28 @@ Agent Prompt에 불필요한 사용자 이동 History 전체를 노출하지 않
 
 ---
 
-## 14. 최종 제안
+## 14. 최종 MCP 제공 구조
 
-### MVP 권장 구조
+~~~text
+Hermes + Solar Pro4
+  ↕
+MCP 도구
+  get_capabilities · search_places · interpret_trip
+  plan_journey · replan_journey
+  ↕
+FastAPI → MainAgent → 역할별 SubAgent·Skill
+  ↓
+Deadline / Routing / Last Journey / Buffer / Replanning 코드
+  ↓
+검증된 장소·교통 데이터
+~~~
 
-```text
-Mobile App
-   ↓
-Backend API
-   ↓
-Mobility Orchestrator Agent
-   ↓
-┌────────────────────────────┐
-│ parse_mobility_request     │
-│ interpret_calendar_event   │
-│ resolve_place              │
-│ calculate_deadline         │
-│ search_transit_routes      │
-│ find_last_feasible_journey │
-│ apply_safety_buffer        │
-│ calculate_leave_time       │
-│ monitor_journey_state      │
-│ detect_departure           │
-│ detect_arrival             │
-│ replan_journey             │
-│ search_taxi_transit_hybrid │
-│ evaluate_notification      │
-│ explain_recommendation     │
-└────────────────────────────┘
-   ↓
-Deterministic Domain Services
-   ↓
-Routing / Public Data / Calendar / Push / Location
-```
+핵심은 검증 가능한 Domain Logic을 재사용해 MCP로 제공하는 것이다. MCP 도구와 내부 Domain Skill은 일대일 대응이 아니다. Calendar·Push·GPS·Taxi는 현재 필수 연결이 아니다.
 
-핵심은 Agent를 서비스의 "두뇌"처럼 포장하는 것이 아니라, **정확한 Domain Logic을 연결하는 Orchestrator**로 제한하는 것이다.
+> **MCP Interface + Deadline Engine + Last Journey Logic + User-confirmed Replanning + Agent-assisted Conversation**
 
-`지금`의 경쟁력은 Agent 자체가 아니라 다음 조합에서 나온다.
 
-> **Deadline Engine + Last Journey Logic + Monitoring + Replanning + Agent-assisted UX**
+
+---
 
 이 구조를 유지하면 AI가 없어도 핵심 서비스가 동작하고, AI를 추가했을 때 사용성과 자동화 수준이 올라가는 안정적인 아키텍처를 만들 수 있다.

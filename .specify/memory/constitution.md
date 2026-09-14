@@ -1,50 +1,128 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: 2.0.0 -> 2.0.1
+- Reason: 확정된 MCP 제공 방향을 PRD·Agent 제안·분업안·Skill 참고 문서까지 일관되게 명시. 제품·API 의미 변경 없음.
+- Modified principles: V의 독립 클라이언트 선택 요구를 MCP 제공 원칙으로 대체.
+- Modified sections: 기술 및 운영 제약, 개발 워크플로와 품질 게이트.
+- Affected documents: IDEA.md, AGENTS.md, README.md, API_SPEC.md의 제품 설명, specs/001-trip-intake-and-planning.
+- Migration: 이전 US4·FR-013~016·T035~040 저장/상태/알림 요구는 비적용. 기존 코드·JSON 스키마·fixture는 유지.
+- Required verification: Hermes→MCP→FastAPI 호출, 사용자 확인·선택 상태, 기존 계산 계약 회귀 검증. 이 문서 수정으로 실행 완료를 주장하지 않음.
+-->
+
+# 지금 서비스 헌법
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. 제품 방향과 문서 기준
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+모든 작업은 `IDEA.md`를 최신 제품 방향과 범위의 최우선 기준으로 사용해야 한다(MUST).
+작업자는 `IDEA.md`, `API_SPEC.md`, 해당 `agent_specs`와 `specs` 순서로 문서를 읽고,
+`API_SPEC.md`를 클라이언트와 서버의 공개 요청·응답 계약 기준으로 사용해야 한다(MUST).
+이전 `Docs` 문서는 맥락 자료로만 사용할 수 있으며(MAY), `IDEA.md`와 충돌하는 제안을
+구현해서는 안 된다(MUST NOT). 이 원칙은 서로 다른 작업자가 오래된 제안이나 서로 다른
+계약을 기준으로 개발하는 일을 방지한다.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. 검증 가능한 코드와 실제 데이터
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+경로 유효성, 시간 계산, 상태 전이, 횟수 제한, 권한 검증은 테스트 가능한 코드로 처리해야
+한다(MUST). AI는 자연어 입력 구조화, 필요한 확인 질문, 검증된 계산 결과의 설명에만
+사용해야 하며(MUST), 실시간 교통편, 막차시각, 경로, 요금 또는 이동시간을 생성하거나
+추측해서는 안 된다(MUST NOT). 모든 교통 결과는 실제로 확인한 데이터의 출처와 기준시각을
+포함해야 한다(MUST). Demo·fixture 데이터는 실제 데이터와 명확히 표시·분리해야 하며(MUST),
+운영 조회 실패를 Demo 결과로 대체해서는 안 된다(MUST NOT). 이 원칙은 사용자가 검증되지
+않은 이동 정보를 사실로 받아들이는 위험을 차단한다.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. 사용자 확인과 계획 통제
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+경로 계산 전에는 해석된 장소, 시각, 도착 여유, 이동수단을 사용자에게 표시하고 명시적
+확인을 받아야 한다(MUST). 넓은 지역명, 학교명, `집`과 같은 표현을 임의의 장소로
+확정해서는 안 되며(MUST NOT), 이미 확정된 명확한 조건을 불필요하게 다시 질문해서도 안
+된다(MUST NOT). 재탐색은 MVP에서 사용자 요청으로 시작해야 하고(MUST), 새 결과는 사용자가
+선택하기 전까지 기존 계획에 적용해서는 안 된다(MUST NOT). 실패하거나 취소된 재탐색은
+기존 기록을 삭제해서는 안 된다(MUST NOT). 이 원칙은 계산과 계획 변경의 최종 결정권을
+사용자에게 둔다.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. 계약 우선 통합과 실행 구조
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+두 개발자는 Spec Kit을 사용해 명세, 계획, 작업을 관리해야 한다(MUST). 공개 API의 경로,
+필드, 상태, 오류 의미를 변경하려면 두 개발자가 먼저 합의하고 `API_SPEC.md`와
+`Docs/api/examples.json`을 함께 갱신한 뒤 구현해야 한다(MUST). 클라이언트와 서버는 동일한
+구조화 JSON 계약을 사용해야 하며(MUST), 제공처 교체는 공개 계약을 보존하는 Adapter로
+격리해야 한다(MUST).
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+서비스의 MainAgent는 요청과 상태를 바탕으로 SubAgent의 실행 순서와 결과 취합을 지휘해야
+한다(MUST). 한 SubAgent는 역할에 필요한 여러 Skill을 사용할 수 있으며(MAY), 이 서비스
+실행 구조를 개발용 코딩 에이전트 분업과 혼동해서는 안 된다(MUST NOT). `.hermes/skills`를
+Skill 원본의 단일 저장 위치로 사용해야 하며(MUST), 원본이 없는 준비 폴더에 가짜
+`SKILL.md`를 만들어 구현 완료를 표현해서는 안 된다(MUST NOT).
+
+### V. MVP 범위, 보안, 증거 기반 완료
+
+작업은 2명·4일 MVP 범위 안에서 수행해야 한다(MUST). 서비스는 MCP로 제공해야 한다(MUST).
+독립 사용자 클라이언트를 개발하는 범위로 확장해서는 안 된다(MUST NOT).
+Hermes는 개발·시연용 MCP 클라이언트이며, MCP를 별도 제품 개발 전 임시 단계로 취급해서는 안 된다(MUST NOT).
+택시비 상한선, 택시 최적화, 상시 GPS 추적, 자동 재탐색 등 보류 기능을 승인 없이 MVP에
+포함해서는 안 된다(MUST NOT).
+
+UserData DB·회원가입·영구 이동 이력은 현재 MCP 필수 범위가 아니다. 이를 추가할 때는 저장 항목,
+사용자 식별, 인증, 접근 제어, 삭제 정책과 API 계약을 구현 전에 합의해야 한다(MUST).
+교통·백엔드 AI·DB 자격증명은 백엔드 환경에서, Hermes 모델 자격증명은 Hermes 비밀 설정에서
+관리해야 한다(MUST). 문서·설정 예제·도구 응답·로그에 비밀 값을 포함해서는 안 된다(MUST NOT).
+기존 파일과 사용자 작업을 보존해야 하고(MUST), 요청 없는 삭제, 강제 푸시, 인프라 변경을
+수행해서는 안 된다(MUST NOT). 실행하지 않은 테스트, 조회, 저장, 알림, 배포를 성공으로
+보고해서는 안 된다(MUST NOT). 완료 주장은 재현 가능한 실행 증거에 근거해야 한다(MUST).
+
+## 기술 및 운영 제약
+
+- 대상 지역은 서울이며, 실제 지원 범위는 검증된 교통 데이터의 지역·노선·운행일로
+  제한해야 한다(MUST).
+- 백엔드는 FastAPI, Docker, GCP Cloud Run 구성을 기준으로 한다. Cloud Run 컨테이너는
+  플랫폼의 `PORT` 환경변수와 `0.0.0.0`을 사용해야 한다(MUST).
+- Hermes + Solar Pro4를 개발과 시연에 사용한다. 로컬 stdio MCP 연결을 우선 검증하고,
+  MCP 도구는 기존 FastAPI HTTP API를 호출한다. MCP와 내부 백엔드의 실행 경계를 구분해야 한다(MUST).
+- 현재 대화의 확인 조건·선택 계획만을 기본 범위로 다룬다. 영구 저장·진행 상태 버튼·자동 알림을
+  필수로 구현해서는 안 된다(MUST NOT). 사용자 확인·문맥 소유권·수명은 구현 전에 합의해야 한다(MUST).
+- 원격 백엔드 연결에는 HTTPS를 사용해야 한다(MUST). 로컬 개발 HTTP는 별도 구분한다.
+  MCP 클라이언트가 DB에 직접 접속해서는 안 된다(MUST NOT). 원격 공개의 인증·호출 제한을 별도로 검토한다.
+- 본인은 MCP 도구·HTTP 연결·Hermes 확인/선택 흐름·설정·시연을, 친구는 FastAPI,
+  Agent·Skill 통합, AI·교통 데이터, 계산, 재탐색, 테스트·배포를 담당한다.
+  API·MCP 계약, 통합 검증, 지원 범위와 제출 자료는 공동 책임이다.
+
+## 개발 워크플로와 품질 게이트
+
+1. 작업을 시작하기 전에 기준 문서와 기존 구현을 읽고, 확정 사항과 미확정 사항을
+   구분해야 한다(MUST).
+2. API 또는 사용자 데이터 계약 변경은 구현보다 먼저 합의·문서화하고 fixture와 함께
+   갱신해야 한다(MUST).
+3. 가장 작은 약속 이동 흐름인 자연어 입력, 조건 확인, 실제 데이터 조회, 권장 출발시각과
+   근거 표시를 먼저 종단 간 연결해야 한다(MUST). 막차와 재탐색은 검증된 지원 범위 안에서
+   확장해야 한다(MUST).
+4. 시간대 `Asia/Seoul`, 자정 경계, 도착 여유, Buffer 중복 계산, 상태 전이, 사용자 고정
+   조건, 데이터 없음과 제공처 장애의 구분을 자동화된 테스트 또는 재현 가능한 통합
+   검증으로 확인해야 한다(MUST).
+5. Mock과 실제 서버는 같은 공개 JSON 구조를 사용해야 하며(MUST), Mock 날짜와 서버 시각을
+   실제 운행 계산에 주입해서는 안 된다(MUST NOT).
+6. MCP 계층과 백엔드는 개발 중 정기적으로 통합해야 하며(MUST), 최종일 전에 다른 환경에서
+   Hermes의 도구 발견·호출과 백엔드 응답 수신을 검증해야 한다(MUST). 배포 서버 연결 상태도 별도 기록한다.
+7. 검토자는 구현이 본 헌법, `IDEA.md`, `API_SPEC.md`, 관련 spec과 일치하는지 확인하고,
+   실행한 검증과 실행하지 못한 검증을 결과에 구분해 기록해야 한다(MUST).
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+이 헌법은 Project Jigeum의 공통 개발 원칙을 성문화한다. 제품 범위는 `IDEA.md`, 공개 API
+계약은 `API_SPEC.md`, 작업 수행 규칙은 루트 `AGENTS.md`가 각각의 권위 있는 상세 기준이며,
+이 헌법은 이들과 일관되게 해석해야 한다(MUST). 충돌이 발견되면 구현을 중단하고(MUST),
+권위 있는 문서를 먼저 합의·수정한 뒤 헌법의 동기화 필요성을 검토해야 한다(MUST).
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+헌법 개정은 변경 이유, 영향을 받는 원칙과 산출물, 필요한 마이그레이션 또는 재검증을
+기록해야 한다(MUST). API, 저장, 인증, 권한 또는 지원 범위에 영향을 주는 개정은 두 개발자의
+합의가 필요하다(MUST). 모든 spec, plan, tasks와 코드 리뷰는 구현 시작 전과 완료 주장 전에
+헌법 준수를 확인해야 한다(MUST). 예외는 범위와 만료 조건을 문서화한 명시적 승인 없이는
+허용되지 않는다(MUST NOT).
+
+버전은 Semantic Versioning을 따른다. 원칙 제거 또는 호환되지 않는 재정의는 MAJOR,
+원칙·섹션 추가나 실질적 확장은 MINOR, 의미를 바꾸지 않는 설명·표현 수정은 PATCH로
+증가시켜야 한다(MUST). 최초 채택일은 유지하고, 실제 변경이 있을 때 마지막 개정일을
+갱신해야 한다(MUST).
+
+**Version**: 2.0.1 | **Ratified**: 2026-09-13 | **Last Amended**: 2026-09-14

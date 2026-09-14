@@ -1,17 +1,26 @@
-# 지금(가칭) — MVP Product Requirements Document (PRD)
+# 지금(가칭) — MCP 서비스 Product Requirements Document (PRD)
 
-- **문서 버전:** v1.0
+- **문서 버전:** v1.1 — MCP 제공 방향 반영 (파일명은 참조 보존을 위해 유지)
+- **개정일:** 2026-09-14
 - **작성일:** 2026-08-24
 - **서비스 지역:** 서울
-- **출시 목표:** 실제 앱 출시 및 운영
+- **제공 목표:** MCP 도구를 통한 서비스 제공·운영. Hermes + Solar Pro4를 개발·시연용 MCP 클라이언트로 사용
 - **장기 목표:** 사업화 가능성 검증
 - **문서 목적:** 서비스 아이디어를 처음 접하는 기획·디자인·개발 팀원이 제품의 문제 정의, 핵심 사용자 가치, 기능 범위, 정책, 상태 전이, 구현 우선순위를 동일하게 이해할 수 있도록 한다.
 
 ---
 
+## 0. 현재 개발 기준
+
+> **현재 서비스 개발 방향 — 2026-09-14:** 지금은 **MCP로 제공하는 서비스**다. 별도 제품 화면·설치형 클라이언트를 개발하지 않는다. 본인은 MCP 도구·Hermes 연결·확인/선택 흐름·시연을, 친구는 FastAPI·서비스 Agent·교통 데이터·계산·배포를 담당한다. Hermes + Solar Pro4는 개발·시연용 MCP 클라이언트다. 현재 구현 범위와 완료 기준은 IDEA.md를 따른다.
+
+이 PRD의 기존 도메인 정책은 보존하되 현재 4일 MVP와 후속 확장을 구분한다. GPS·상태 자동 감지·Calendar·Push·택시 최적화·개인화는 후속 확장 정책이며 구현 지시나 완료 주장으로 해석하지 않는다.
+
+서비스 구조는 사용자 ↔ Hermes + Solar Pro4 ↔ 지금 MCP 서버 ↔ 기존 FastAPI·서비스 Agent·계산 ↔ 검증된 교통 데이터다. 외부 기능 인터페이스는 MCP이며 FastAPI는 내부 계산 API다. MCP는 임시 시연 방식이나 별도 제품 개발 전 단계가 아니다.
+
 ## 1. 제품 한 줄 정의
 
-> **지금**은 약속이나 막차처럼 사용자가 반드시 지켜야 하는 **이동 Deadline**을 기준으로, 언제 출발해야 하는지 계산하고 출발 전후 Journey를 Monitoring하여 기존 이동 계획이 실패할 위험이 생기면 다음 행동을 다시 제안하는 **Deadline-aware Mobility Assistant**이다.
+> **지금**은 약속·막차의 **이동 Deadline**에 맞춘 출발시각과 계획 실패 시 대안을 MCP 도구로 제공하는 **Deadline-aware Mobility MCP Service**다. 현재 MVP는 사용자 요청·확인·선택을 기준으로 동작한다.
 
 기존 지도 서비스가 주로 **"어떻게 갈 것인가"**를 알려준다면, 지금은 그 위에서 **"언제 움직여야 하는가"**, **"지금 계획이 아직 유효한가"**, **"계획이 깨졌다면 무엇을 해야 하는가"**를 판단하는 Decision Layer를 목표로 한다.
 
@@ -29,7 +38,7 @@
 - "원래 경로가 지연됐는데 다른 방법으로는 시간 안에 갈 수 있나?"
 - "이미 늦을 것 같은데 지금 가장 빨리 도착할 방법은 무엇인가?"
 
-현재는 사용자가 지도 앱, 막차 정보, 실시간 교통 정보, 개인적인 안전 여유를 직접 조합해 판단해야 하는 경우가 많다.
+현재는 사용자가 지도 서비스, 막차 정보, 실시간 교통 정보, 개인적인 안전 여유를 직접 조합해 판단해야 하는 경우가 많다.
 
 ### 2.2 핵심 Pain Point
 
@@ -50,10 +59,10 @@
 
 ### 3.1 MVP 핵심 목표
 
-MVP에서 해결해야 하는 Core Job은 다음 두 가지이며 **동등한 우선순위**를 가진다.
+제품의 두 Core Job은 약속 출발 판단과 막차 귀가 판단이다. 4일 MVP에서는 약속 흐름을 먼저 종단 간 연결하고, 막차는 첫날 검증한 노선·운행일·환승 데이터 범위에서 제공한다.
 
 #### A. Appointment Deadline
-사용자가 약속, 수업, 업무 등 특정 시간까지 목적지에 도착해야 할 때 **Recommended Leave Time**을 계산하고 변경이 발생하면 알린다.
+사용자가 약속, 수업, 업무 등 특정 시간까지 목적지에 도착해야 할 때 **Recommended Leave Time**을 계산해 요청 결과로 전달한다. 변경 재계산은 사용자 요청으로 시작하며 자동 알림은 현재 범위가 아니다.
 
 #### B. Last Journey Deadline
 사용자가 대중교통으로 목적지까지 귀가할 수 있는 **Recommended Last Departure**를 계산하고, 기존 막차 Journey가 깨질 경우 Alternative Journey를 다시 탐색한다.
@@ -61,7 +70,7 @@ MVP에서 해결해야 하는 Core Job은 다음 두 가지이며 **동등한 �
 ### 3.2 보조 목표
 
 - 사용자가 최대한 늦게 출발하고 싶을 때의 효율성 제공
-- Calendar 기반으로 반복 입력 부담을 줄임
+- Calendar 기반 반복 입력 감소는 후속 확장으로 보존
 - 자연어 입력으로 설정 과정 단축
 - 사용자 이동 Preference를 Route 판단에 반영
 
@@ -78,10 +87,10 @@ MVP에서는 다음을 목표로 하지 않는다.
 - 강화학습 기반 교통 혼잡 예측
 - 모든 PM Provider 통합
 - 음식점/주변 장소 추천
-- 일정관리 앱 전체 기능
+- 일정관리 서비스 전체 기능
 - 대중교통 정상 이동 중 지속적인 세부 Navigation 안내
 
-**원칙:** 지금은 지도 앱을 대체하는 서비스가 아니라, 외부 Routing/Navigation 위에서 Deadline 판단과 Exception Handling을 담당하는 서비스다.
+**원칙:** 지금은 지도 서비스을 대체하는 서비스가 아니라, 외부 Routing/Navigation 위에서 Deadline 판단과 Exception Handling을 담당하는 서비스다.
 
 ---
 
@@ -114,7 +123,7 @@ MVP에서는 다음을 목표로 하지 않는다.
 
 ### 6.1 Time is Hero
 
-지도나 경로보다 **출발해야 하는 시간**을 화면의 가장 중요한 정보로 표시한다.
+MCP 도구 결과와 Hermes 설명에서 **출발해야 하는 시간**을 가장 먼저 제시한다. 별도 결과 화면을 구현하지 않는다.
 
 예:
 
@@ -131,11 +140,9 @@ MVP에서는 다음을 목표로 하지 않는다.
 대중교통 귀가 권장 마지노선
 ```
 
-### 6.2 Exception-driven Monitoring
+### 6.2 사용자 요청 기반 예외 대응
 
-사용자가 정상적으로 이동 중이라면 앱은 개입하지 않는다.
-
-다음 상황에서만 적극적으로 개입한다.
+현재 MCP MVP는 상시 감시하거나 자발적으로 개입하지 않는다. 사용자가 다음 상황을 알려 재탐색을 요청하면 현재 조건을 확인하고 대안을 조회한다. 자동 감시는 후속 확장이다.
 
 - 환승 가능성이 낮아짐
 - 예정 교통편을 놓침
@@ -150,7 +157,7 @@ MVP에서는 다음을 목표로 하지 않는다.
 - **Hard Deadline:** 데이터상 이론적으로 가능한 최후 시각
 - **Recommended Deadline:** Safety Buffer를 적용한 사용자 노출용 권장 시각
 
-기본 화면에서는 Recommended 값을 우선 노출한다.
+도구 결과를 설명할 때 Recommended 값을 우선하고 Hard Deadline과 구분한다.
 
 ---
 
@@ -170,10 +177,9 @@ MVP 지원:
 - 도보
 - 지하철+버스 조합
 
-조건부 지원:
+현재 MVP 제외:
 
-- Taxi + Transit Hybrid
-  - 사용자가 온보딩에서 Taxi 사용을 허용한 경우에 한함
+- Taxi + Transit Hybrid와 택시비 상한선. 관련 정책은 후속 확장에만 적용한다.
 
 MVP 이후 검토:
 
@@ -185,7 +191,7 @@ MVP 이후 검토:
 
 ## 8. 핵심 사용자 입력
 
-사용자는 두 경로로 이동 Deadline을 생성할 수 있다.
+현재 사용자는 Hermes 대화로 이동 Deadline을 입력한다. Calendar 연동은 후속 확장이다.
 
 ### 8.1 Natural Language Input
 
@@ -218,7 +224,7 @@ NLP의 역할은 Core Intelligence가 아니라 **Input UX**다.
 → 잠실역 / 잠실종합운동장 / 기타 POI 확인  
 → 오전/오후 및 출발/도착 의미가 불명확하면 Confirmation
 
-### 8.2 Calendar Integration
+### 8.2 Calendar Integration — 후속 확장, 현재 비적용
 
 Calendar에서 장소가 포함된 일정을 감지한다.
 
@@ -235,95 +241,45 @@ Calendar에서 장소가 포함된 일정을 감지한다.
 
 ---
 
-## 9. Onboarding
+## 9. MCP 입력 조건과 선호 확인
 
-초기 Onboarding에서 지나치게 많은 숫자 입력을 요구하지 않는다.
+별도 온보딩 화면·사용자 계정·장소 저장 기능을 만들지 않는다.
 
-### 9.1 자주 가는 장소
-
-- 집
-- 학교
-- 회사
-- 건너뛰기 가능 항목 허용
-
-### 9.2 도보 Preference
-
-예:
-
-- 적게
-- 보통
-- 많이
-- 직접 설정
-
-### 9.3 Arrival Preference
-
-예:
-
-- 정시
-- 5분 전
-- 10분 전
-- 20분 전
-- 직접 설정
-
-이 Preference는 일반 Appointment의 Target Arrival Time 산출에 사용한다.
-
-### 9.4 Taxi 사용
-
-필수 선택:
-
-```text
-대중교통이 끊긴 경우 Taxi를 포함한 경로도 찾을까요?
-
-[사용함] [사용 안 함]
-```
-
-선택 입력:
-
-```text
-허용 가능한 최대 Taxi 비용
-[        원]
-```
-
-최대 비용을 입력하지 않은 경우 **비용 무제한**으로 해석하지 않는다.  
-대신 Taxi Distance / 예상 Taxi Cost를 최소화하는 방향의 Alternative를 우선한다.
-
-### 9.5 Calendar
-
-Calendar 연동은 선택이나, 핵심 Retention 기능으로 적극 안내한다.
+- 이번 이동에서 사용자가 명시한 출발 기준점·목적지·Deadline·도착 여유·교통수단을 우선한다.
+- 확인된 선호가 없으면 capabilities 기본값을 최종 조건 요약에 표시한다.
+- 집·학교·회사 표현을 저장된 위치로 임의 해석하지 않고 가까운 역·정류장·건물 출입구 등 필요한 최소 장소를 확인한다.
+- 이용 교통수단은 버스·지하철, 도보는 연결 구간으로 기본 허용한다.
+- 도착 여유는 Deadline과 구분한다. “19시까지 도착”을 여유 미지정 때문에 다시 묻지 않는다.
+- 필수 조건이 부족하면 한 번에 최대 3개의 질문을 한다. 모든 조건이 정리되면 실제 계산 전에 최종 확인을 받는다.
+- 택시 허용·비용 상한선과 Calendar 권한은 현재 입력·저장 범위가 아니다.
 
 ---
 
 ## 10. Appointment Deadline Flow
 
-```text
-Natural Language / Calendar
+~~~text
+Hermes 자연어 입력
         ↓
-일정 및 목적지 확정
+interpret_trip / search_places
         ↓
-도착 Deadline
+장소·날짜·Deadline·도착 여유·이동수단 확인
         ↓
-Arrival Preference 적용
+사용자 최종 확인
         ↓
-Target Arrival Time
+plan_journey → FastAPI
         ↓
-Routing
+검증된 Routing + 코드 기반 Safety Buffer
         ↓
-Route-specific Safety Buffer 적용
+Recommended Leave Time · Target Arrival · 근거
         ↓
-Recommended Leave Time
+사용자가 후보 선택
         ↓
-Background Monitoring
-        ↓
-Adaptive Notification
-        ↓
-GPS 출발 감지
-        ↓
-IN_TRANSIT
-        ↓
-Exception-driven Monitoring
-        ↓
-ARRIVED
-```
+사용자 요청 시 replan_journey → 비교 → 선택 후 적용
+~~~
+
+자동 감시·GPS 출발/도착 판정·예약 알림은 이 흐름에 포함하지 않는다.
+
+---
 
 ### 10.1 이미 늦을 것으로 예상되는 경우
 
@@ -341,8 +297,8 @@ ARRIVED
 예:
 
 ```text
-대중교통 19:07 도착
-Taxi 18:58 도착
+확인된 대중교통 후보 A: 19:07 도착
+다른 후보: 실제 조회 결과가 있을 때만 비교
 ```
 
 사용자를 질책하거나 실패 메시지를 강조하지 않는다.  
@@ -375,7 +331,9 @@ Taxi 18:58 도착
 ### 11.2 기본 Flow
 
 ```text
-출발지 / 목적지
+출발지 / 목적지 / 운행일 확인
+        ↓
+사용자 최종 확인 → plan_journey
         ↓
 Bus + Subway Route 탐색
         ↓
@@ -385,40 +343,30 @@ Last Feasible Journey 계산
         ↓
 Route-specific Safety Buffer
         ↓
-Recommended Last Departure
+Recommended Last Departure + Hard Deadline + 근거
         ↓
-Monitoring
-        ↓
-Journey 유효성 재검증
+사용자 요청 시 현재 조건 확인 후 재탐색
 ```
 
 ### 11.3 Journey 실패 시
 
-```text
-Journey 실패
-    ↓
-자동 Replan #1
-    ↓
-Journey 실패
-    ↓
-자동 Replan #2
-    ↓
-Journey 실패
-    ↓
-자동 Replan #3
-    ↓
-사용자에게 계속 탐색할지 확인
-```
+~~~text
+사용자: 환승을 놓쳤어. 다시 찾아줘
+        ↓
+현재 출발 기준점·유지할 목적지·Deadline 확인
+        ↓
+사용자 요청 확인 → replan_journey
+        ↓
+검증된 대안·기존 계획 대비 변화
+        ↓
+사용자 후보 선택 후 적용
+~~~
 
-자동 Re-routing은 최대 3회의 **사용자 관점 Journey 재제시**까지 허용한다.
-
-Backend의 네트워크 재시도나 API Retry는 이 횟수에 포함하지 않는다.
-
-사용자가 계속 탐색을 승인하면 새 Cycle로 전환한다.
+자동 재탐색·주기당 재제시 3회 정책은 현재 수동 요청 횟수 제한이 아니다. 해당 정책은 자동 감시를 도입할 때 별도 사용자 승인·주기 설계와 함께 검토한다. 네트워크 재시도는 사용자에게 새 Journey를 제시한 횟수와 구분한다.
 
 ---
 
-## 12. Taxi + Transit Hybrid
+## 12. Taxi + Transit Hybrid — 후속 확장, 현재 비적용
 
 Taxi 사용 허용 사용자의 경우, 순수 대중교통 Journey가 더 이상 불가능할 때 Hybrid를 탐색할 수 있다.
 
@@ -435,7 +383,7 @@ Taxi 2.8km
 
 정책:
 
-- Taxi 사용 허용 여부는 Onboarding에서 필수 선택
+- 후속 도입 시 Taxi 사용 여부·비용 조건을 별도 확인한다. 현재는 수집하지 않는다.
 - 최대 Taxi 비용은 선택값
 - 최대 비용 입력 시 Cost Constraint 적용
 - 미입력 시 Taxi 사용량/거리/예상비용 최소화 우선
@@ -473,7 +421,7 @@ MVP에서 상세 규칙과 수치는 Technical Spike/실데이터 검증 후 확
 
 ---
 
-## 14. Monitoring 정책
+## 14. Monitoring 정책 — 후속 확장, 현재 비적용
 
 ### 14.1 출발 전 Monitoring
 
@@ -495,13 +443,13 @@ Recommended Leave Time에 가까워질수록 재계산 주기를 점진적으로
 | 10분 이내 | 1~2분 이상 |
 | Last Journey | 중요 변화 즉시 |
 
-정확한 값은 MVP QA 및 사용성 테스트에서 조정한다.
+이 수치는 후속 자동 알림 도입 시 검증할 정책 예시이며 현재 MCP MVP의 알림 구현 요구가 아니다.
 
 막차 Scenario는 일반 약속보다 더 민감하게 처리한다.
 
 ---
 
-## 15. 출발 판단
+## 15. 출발 판단 — 후속 센서 연동 정책, 현재 비적용
 
 ### 15.1 Primary Source
 
@@ -536,7 +484,7 @@ GPS가 Primary Source인 정책은 유지하되 Escape Hatch를 제공한다.
 
 ---
 
-## 16. 출발 후 Monitoring
+## 16. 출발 후 Monitoring — 후속 확장, 현재 비적용
 
 ### 16.1 Product Boundary
 
@@ -576,36 +524,21 @@ Last Journey Loss
 
 ---
 
-## 17. Route Deviation 정책
+## 17. 사용자 요청 재탐색과 선택 정책
 
-사용자가 추천 경로와 다른 교통편을 이용한 경우 앱은 즉시 새 경로를 강제하지 않는다.
+현재 MCP MVP는 경로 이탈을 자동 감지하지 않는다. 사용자가 다른 경로로 이동했다고 알리면 다음을 수행한다.
 
-정책:
+1. 새 출발 기준점과 유지할 목적지·Deadline을 확인한다.
+2. 사용자가 재탐색을 요청·확인하면 현재 서버 시각 기준으로 replan_journey를 호출한다.
+3. 후보와 이전 선택 대비 변화를 반환한다.
+4. 사용자 선택 전에는 기존 계획을 교체하지 않는다.
+5. 실패·취소 시 기존 선택을 지우지 않되 그 경로의 현재 유효성을 보장하지 않는다.
 
-```text
-추천 Route 이탈 감지
-        ↓
-기존 Journey Monitoring 종료/일시중단
-        ↓
-"현재 위치에서 다시 계산할까요?"
-        ↓
-사용자 승인
-   ┌──────┴──────┐
-   │             │
- 거절            승인
-   │             │
- 종료        새 Journey 생성
-                 ↓
-             Monitoring 재개
-```
-
-즉:
-
-**C → B → 사용자 허가 시 A**
+후속 센서 연동에서 이탈을 감지하더라도 사용자 선택 없이 새 계획을 강제하지 않는다.
 
 ---
 
-## 18. 도착 판단
+## 18. 도착 판단 — 후속 센서 연동 정책, 현재 비적용
 
 ### 18.1 자동 판단
 
@@ -634,7 +567,7 @@ ARRIVED
 
 ---
 
-## 19. Calendar Conflict
+## 19. Calendar Conflict — 후속 확장, 현재 비적용
 
 동시에 여러 Calendar 일정이 충돌하는 경우 시스템이 임의로 우선순위를 결정하지 않는다.
 
@@ -668,180 +601,59 @@ MONITORING
 
 ---
 
-## 20. Permission 정책
+## 20. MCP 권한·확인·개인정보 정책
 
-### 20.1 Location Permission
-
-거부 시 앱 전체를 차단하지 않고 **Limited Mode**를 제공한다.
-
-#### Full Mode
-- 현재 위치 자동 인식
-- GPS 출발 감지
-- Route Deviation 감지
-- 이동 중 Monitoring
-- 자동 도착 감지
-
-#### Limited Mode
-사용자가 직접 출발지를 입력한다.
-
-제공:
-- Recommended Leave Time
-- Last Journey 계산
-- 기본 Route 조회
-- Calendar 관리
-- 시간 기반 알림
-
-제한:
-- 자동 출발 감지
-- 실제 이동 기반 Monitoring
-- Route Deviation 감지
-- 자동 도착 감지
-
-### 20.2 Notification Permission
-
-알림을 거부해도 앱 자체 사용은 가능하다.
-
-다만 명확히 고지한다.
-
-> 알림을 허용하지 않으면 출발시간 변경이나 막차 마지노선 변화를 앱 밖에서 알려드릴 수 없습니다.
-
-서비스 Notification과 마케팅 수신 동의는 명확히 분리한다.
-
-예시 내부 카테고리:
-
-- Journey / Deadline
-- Calendar
-- Marketing
-
-Marketing은 별도 선택 동의다.
+- Hermes의 도구 연결 권한과 사용자가 특정 이동 조건에 동의했다는 사실은 별개다.
+- get_capabilities·search_places·interpret_trip 결과를 전달하고, 계산 전 최종 조건 확인을 받는다.
+- ready_for_plan=true 또는 모델이 생성한 user_confirmed=true만으로 사람의 동의가 검증됐다고 보지 않는다. 확인한 조건·사용자 응답을 요청에 결부하는 방법을 코드와 명세에서 정하고 테스트한다.
+- 조건이 바뀌면 재확인하며 재탐색 결과는 사용자 후보 선택 후 적용한다.
+- 위치는 사용자에게 필요한 최소 기준점을 확인한다. OS 위치 권한이나 상시 GPS 접근을 요구하지 않는다.
+- 현재 MVP에는 알림 발송·마케팅 수신·Calendar 접근 권한을 요구하지 않는다.
+- 대화별 문맥·선택 계획의 위치와 수명을 공동 합의하고 다른 사용자의 상태와 섞지 않는다.
+- 도구 응답·설정 예제·로그·영상에 실제 교통·모델 비밀키를 노출하지 않는다.
+- 원격 MCP 또는 공개 백엔드 운영에는 별도의 접근 제어·호출 제한·인증 검토가 필요하다. 로컬 시연 성공이 공개 운영 보안 검증을 뜻하지 않는다.
 
 ---
 
-## 21. 주요 상태 모델
+## 21. 현재 대화의 조건·선택 상태
 
-### 21.1 Main State
+개념 흐름은 입력 부족 → 조건 요약 → 사용자 최종 확인 → 계산 결과 → 후보 선택 → 사용자 요청 재탐색 → 새 후보 선택이다.
 
-```text
-SCHEDULED
-    ↓
-MONITORING
-    ↓
-READY_TO_LEAVE
-    ↓
-POSSIBLY_DEPARTED
-    ↓
-DEPARTED
-    ↓
-IN_TRANSIT
-    ↓
-POSSIBLY_ARRIVED
-    ↓
-ARRIVED
-```
+이는 새로운 REST status enum을 추가하는 정의가 아니다. 기존 공개 응답 status는 ok / needs_confirmation / unavailable / error를 유지한다. 확인·선택 상태의 저장 위치와 수명은 구현 전에 합의한다.
 
-### 21.2 Exception State
-
-- LATE_RISK
-- ROUTE_AT_RISK
-- MISSED_CONNECTION
-- LAST_JOURNEY_LOST
-- ROUTE_DEVIATED
-- REPLANNING
-- MANUAL_REPLAN_REQUIRED
-- CANCELLED
-- CONFLICT_DETECTED
-- USER_DECISION_REQUIRED
-
-상태 전이는 Backend 구현 전에 별도 State Transition Table로 상세화한다.
+- 요청별 계산 서버가 과거 대화를 영구 보존한다고 가정하지 않는다.
+- Plan과 선택 option_id를 기준으로 재탐색 요청의 trip·previous_plan을 구성한다.
+- 필요한 문맥을 잃으면 다시 확인하고 임의 복원하지 않는다.
+- 늦게 도착한 과거 응답이 최신 조건·선택을 덮어쓰지 않도록 한다.
+- SCHEDULED/DEPARTED/ARRIVED 같은 진행 상태 자동 추적·영구 이력·알림 상태는 현재 필수 모델이 아니다.
 
 ---
 
-## 22. 화면 요구사항
+## 22. MCP 도구와 결과 전달 요구사항
 
-### 22.1 Home
+본인 담당은 화면 개발이 아니라 MCP 도구·백엔드 연결·Hermes 확인/선택 흐름이다. 사용자가 읽는 대화는 Hermes가 제공한다.
 
-Home은 지도보다 Time을 중심으로 구성한다.
+| MCP 도구 | 기존 백엔드 API | 역할 |
+|---|---|---|
+| get_capabilities | GET /api/v1/capabilities | 지원 지역·교통수단·운행일·기본값·데이터 상태 |
+| search_places | GET /api/v1/places | 정확한 출발·도착 기준점 후보 |
+| interpret_trip | POST /api/v1/mobility/interpret | 구조화 조건·부족 정보·확인 질문 |
+| plan_journey | POST /api/v1/journeys/plan | 사용자 확인 후 약속·막차 계획 |
+| replan_journey | POST /api/v1/journeys/replan | 요청 기반 대안·기존 선택 대비 변화 |
 
-예:
+### 조건 확인
 
-```text
-오늘
+출발지·목적지·날짜·Deadline·도착 여유·이동수단을 요약한다. 불명확한 값만 질문하고 최종 사용자 확인을 받는다.
 
-19:00 저녁 약속
-강남역
+### 계획 결과
 
-18:27 출발 권장
-출발까지 1시간 14분
+권장 출발시각, 목표 도착·예상 도착, 검증된 경로, Safety Buffer 근거, Deadline 위험, 출처·기준시각·데모 여부를 전달한다. 막차는 Recommended Last Departure와 Hard Deadline을 구분한다.
 
-[경로 보기]
-```
+### 실패와 대안
 
-막차:
+업무상 미지원·경로 없음과 제공처 장애·시간 초과를 구분한다. 확인되지 않은 시간을 생성하지 않는다. 재탐색 결과는 후보이며 사용자 선택 전 자동 적용하지 않는다.
 
-```text
-집으로 가기
-
-23:16
-대중교통 귀가 권장 마지노선
-
-현재 가능한 Alternative 3개
-```
-
-### 22.2 Natural Language Input
-
-```text
-어디에 언제까지 가야 하나요?
-
-"오늘 7시까지 강남역"
-```
-
-### 22.3 Interpretation Confirmation
-
-- 출발지
-- 목적지
-- Deadline
-- Arrival Buffer
-- 이동수단
-- Taxi 허용
-- 모호성 재확인
-
-### 22.4 Leave-by Detail
-
-- Recommended Leave Time
-- Target Arrival Time
-- 예상 도착시간
-- Safety Buffer
-- Route summary
-- Deadline Risk
-- 경로 보기
-
-### 22.5 Last Journey Detail
-
-- Recommended Last Departure
-- Hard Deadline(상세 정보)
-- Last Feasible Journey
-- Alternative Journey
-- Taxi Hybrid 가능 여부
-
-### 22.6 Exception UI
-
-예:
-
-```text
-기존 환승이 어려워졌습니다.
-다른 경로를 찾았습니다.
-
-[새 경로 보기]
-```
-
-Route 이탈:
-
-```text
-추천 경로를 벗어난 것 같아요.
-현재 위치에서 다시 계산할까요?
-
-[다시 계산] [종료]
-```
+MCP 세부 JSON Schema·실행 오류 매핑은 공동 합의한다. REST 경로·필드·오류를 바꾸려면 API_SPEC.md와 예제 JSON을 함께 갱신한다.
 
 ---
 
@@ -867,7 +679,7 @@ RoutingProvider Interface
 
 ### 23.2 Navigation Handoff
 
-Turn-by-turn Navigation은 외부 지도/Navigation 앱으로 연결하는 방식을 우선 검토한다.
+Turn-by-turn Navigation은 구현하지 않는다. 검증된 외부 지도·Navigation URL이 서버 응답에 있을 때 전달할 수 있다.
 
 ---
 
@@ -895,68 +707,49 @@ AI는 서비스의 판단 전부를 담당하지 않는다.
 
 ---
 
-## 25. MVP 기능 우선순위
+## 25. MCP MVP 기능 우선순위
 
 ### MUST
 
-- Natural Language 일정 입력
-- 목적지/시간 Parsing
-- Ambiguity Confirmation
-- 현재 위치/지정 출발지
-- Arrival Preference
-- Recommended Leave Time
-- 버스+지하철 Routing
-- Last Feasible Journey
-- Route-specific Safety Buffer
-- Deadline Notification
-- Adaptive Notification Threshold
-- Background Recalculation
-- Alternative Journey
-- Calendar Event Detection
-- Calendar Event 사용자 승인
-- GPS 출발 감지
-- Manual Departure Override
-- Exception-driven In-trip Monitoring
-- Route Deviation 감지 및 사용자 재탐색 확인
-- GPS 도착 감지
-- Manual Arrival Override
-- 자동 Replan 최대 3회
-- Location Limited Mode
-- Notification Permission 안내
-- Navigation Handoff
+- Hermes + Solar Pro4의 MCP 도구 발견·실제 호출
+- 정확한 장소·시간 해석, 부족 정보 질문, 사용자 최종 조건 확인
+- 실제 데이터·코드 계산에 근거한 약속 출발시각·도착시각·근거
+- 사용자 요청 재탐색·후보 비교·선택 후 적용
+- 구조화 결과, 출처·기준시각·데모 표시
+- 지원 범위 밖·데이터 없음·API 실패·시간 초과 구분
+- 확인·문맥·선택 상태의 검증과 비밀키 보호
+- 재현 가능한 실행 안내·Hermes 설정 예시·시연·테스트 근거
 
-### SHOULD
+### 첫날 데이터 검증 후 제공
 
-- Taxi + Transit Hybrid
-- Taxi 최대비용 선택 입력
-- 도보 Preference
-- 자주 사용하는 장소
-- 일정별 Arrival Preference Override
-- Checkpoint Monitoring 고도화
+- Last Feasible Journey와 Recommended Last Departure
+- 운행일·방향·종착역·환승 연결이 검증된 범위의 막차
+- 서버가 제공하는 검증된 외부 Navigation URL
 
-### COULD / V1+
+### 후속 MCP 기능 확장
 
-- PM
-- 자전거
-- 행사/통제 데이터 고도화 반영
-- 개인화 Safety Buffer
-- 사용자 실제 이동시간 학습
-- 타 지역 확장
-- 자동차
+- Calendar, 자동 감시·알림, GPS·센서 연동, 개인화
+- Taxi + Transit Hybrid·비용 제약, 여러 일정 관리
+- 자주 쓰는 장소·영구 이동 이력·계정 기능
+- 타 지역·다른 교통수단 지원
+
+후속 기능도 MCP 서비스 확장 후보이며 별도 제품 화면 출시 계획을 의미하지 않는다. 현재 도구·권한이 연결되거나 기능이 구현된 것으로 설명하지 않는다.
 
 ### OUT OF SCOPE
 
-- 자체 Turn-by-turn Navigation
-- 자체 지도
-- 강화학습 기반 혼잡 예측
-- 모든 이동수단 통합
-- 주변 장소 추천
+- 별도 제품 화면·설치형 사용자 클라이언트·스토어 배포
+- 자체 Turn-by-turn Navigation·자체 지도
+- 강화학습 기반 혼잡 예측·모든 교통수단 통합·주변 장소 추천
 
 ---
 
 ## 26. Technical Spike
 
-본 개발 전 다음 3개 Spike를 먼저 수행한다.
+첫날 다음 MCP 연결·데이터 검증을 수행한다. 모든 결과는 실제 실행 증거로 남긴다.
+
+### Spike 0 — Hermes·MCP 연결
+
+Solar Pro4가 get_capabilities를 실제 호출해 MCP → FastAPI 응답을 받는지 검증한다. 설치 버전·모델 ID·실행 경로·의존성과 시연 Base URL을 기록한다.
 
 ### Spike 1 — Appointment
 
@@ -1002,52 +795,37 @@ AI는 서비스의 판단 전부를 담당하지 않는다.
 - API Quota/비용
 - 서울 전체 Coverage
 
-### Spike 3 — Journey Monitoring
+### Spike 3 — 사용자 요청 재탐색
 
-목표:
+기존 선택 계획과 사용자 확인 현재 출발지 → replan_journey → 새로운 후보·변화량 → 사용자 선택 후 적용을 검증한다.
 
-```text
-기존 Journey
-+ 현재 위치
-+ 현재 시간
-→ 정상 / 위험 / 이탈 판정
-```
+- 서버 시각 기준 조회·계산
+- 과거 선택과 새로운 후보의 구분
+- 미확인·변경 조건의 재확인
+- 데이터 실패·시간 초과·문맥 유실 시 처리
+- 실제 응답·fixture 분리와 코드 계산 정확성
 
-검증 항목:
-- Background Location
-- Checkpoint 감지
-- 배터리 사용량
-- Route Deviation 판정
-- Re-routing Latency
-- Push Timing
+Background Location·배터리·Push Timing 검증은 후속 기능 도입 시 다룬다.
 
 ---
 
-## 27. 핵심 KPI 제안
+## 27. MCP 서비스 KPI 제안
 
-MVP 출시 후 아래 지표를 우선 관찰한다.
+### 핵심 지표 후보
 
-### North Star 후보
-
-**Managed Journey Success Rate**
-
-> 지금이 관리한 Journey 중 사용자가 설정한 Deadline을 만족하거나, 실패 위험 발생 시 적절한 Alternative를 제공한 비율
+확인된 입력에 대해 근거 있는 출발 계획 또는 적절한 불가 사유를 전달한 비율을 우선 관찰한다. 실제 이동 성공은 사용자 확인이나 별도 검증 데이터 없이 추정하지 않는다.
 
 ### Supporting KPI
 
-- Deadline 등록 → Monitoring 시작 전환율
-- Calendar 감지 → 관리하기 선택률
-- Recommended Leave Notification 확인율
-- 실제 출발시간과 Recommended Leave Time 차이
-- Deadline On-time Arrival Rate
-- Last Journey 성공률
-- Automatic Replan 성공률
-- Manual Replan 요청률
-- Route Deviation 발생률
-- Location Permission 허용률
-- Notification Permission 허용률
-- D7 / D30 Retention
-- 주간 Managed Journey 수
+- MCP 도구 발견·호출·백엔드 응답 성공률
+- 입력 → 사용자 최종 확인 → 계획 결과 전환율
+- 불필요한 재질문·잘못된 장소/시간 확정 비율
+- 출처·기준시각·데모 구분 누락률
+- 사용자 확인 없는 계산·선택 없는 적용 발생률
+- 재탐색 성공률·응답 지연·적절한 실패 안내 비율
+- 사용자 제공 실제 도착 결과가 있을 때의 Deadline 만족률
+
+Calendar·GPS·자동 알림 지표는 해당 후속 기능을 도입한 경우에만 수집한다. 수집 목적·보존 기간·개인정보 권한을 먼저 합의한다.
 
 ---
 
@@ -1070,9 +848,9 @@ MVP 출시 후 아래 지표를 우선 관찰한다.
 대응:
 - Provider Interface 추상화
 - Technical Spike
-- Mock/Fallback 설계
+- 제공처 실패와 데이터 미지원 구분. 실제 조회 실패를 Mock 결과로 자동 대체하지 않음
 
-### 28.3 Background Location
+### 28.3 Background Location — 후속 확장 리스크
 
 배터리, Permission, OS 정책 문제가 있다.
 
@@ -1081,7 +859,7 @@ MVP 출시 후 아래 지표를 우선 관찰한다.
 - Limited Mode
 - Manual Override
 
-### 28.4 Notification Fatigue
+### 28.4 Notification Fatigue — 후속 확장 리스크
 
 작은 시간 변화마다 Push하면 서비스가 피로해진다.
 
@@ -1095,35 +873,35 @@ MVP 출시 후 아래 지표를 우선 관찰한다.
 Navigation, PM, 자동차, 장소 추천까지 확장하면 MVP가 실패할 수 있다.
 
 대응:
-- Deadline/Monitoring Engine 중심 유지
+- MCP 도구·Deadline 계산·사용자 요청 재탐색 중심 유지
 - Non-goal 준수
 
 ---
 
-## 29. 출시 판단 기준
+## 29. MCP 제공·제출 판단 기준
 
-다음 조건을 만족해야 MVP 개발을 본격화한다.
+1. 다른 환경에서 Hermes의 MCP 연결·도구 호출·백엔드 응답을 재현한다.
+2. 확인된 입력으로 약속 출발시각과 검증 근거를 전달한다.
+3. Safety Buffer 중복·자정·운행일 경계·사용자 고정 조건을 검증한다.
+4. 확인 없는 계산과 선택 없는 적용을 차단한다.
+5. 사용자 요청 재탐색과 실패 처리를 검증한다.
+6. 막차를 제공한다면 확보된 데이터의 지원 범위를 명시하고 실제 연결 근거를 확인한다.
+7. 실행 방법·설정 예제·비밀키 보호·테스트·시연 자료를 준비한다.
+8. 주최 측의 원격 MCP 주소·배포·사용 모델 증빙 조건을 별도 확인한다.
 
-1. 서울에서 버스+지하철 Route를 안정적으로 조회할 수 있다.
-2. Last Feasible Journey를 현실적으로 산출할 데이터 또는 API가 확보된다.
-3. Route-specific Safety Buffer 적용이 가능하다.
-4. Background Location 기반 Checkpoint Monitoring이 현실적인 배터리/권한 수준에서 동작한다.
-5. Route Risk 또는 Route Deviation을 MVP 수준에서 판별할 수 있다.
-6. 외부 Navigation Handoff가 사용자 Flow를 훼손하지 않는다.
-
-Spike 2가 실패하면 막차 기능을 단순화하거나 대체 데이터 전략을 먼저 수립한다.
+막차 Spike가 실패하면 범위를 제한하거나 보류한다. 로컬 도구 호출 성공을 실시간 교통 연동·원격 공개·모든 클라이언트 호환성까지 검증한 것으로 표현하지 않는다.
 
 ---
 
 ## 30. 개발 원칙 요약
 
-> **지금은 길을 알려주는 앱이 아니라, 움직여야 할 순간을 판단하는 앱이다.**
+> **지금은 움직여야 할 순간과 다음 행동을 MCP 도구로 제공하는 서비스다.**
 
 개발 과정에서 새로운 기능을 검토할 때 다음 질문을 우선한다.
 
 1. 이 기능이 Deadline 판단 정확도를 높이는가?
 2. 사용자가 움직여야 할 시점을 더 잘 알려주는가?
 3. Journey가 깨지는 순간 더 나은 결정을 제공하는가?
-4. 기존 지도 앱이 이미 잘하는 일을 중복 구현하는 것은 아닌가?
+4. 기존 지도 서비스이 이미 잘하는 일을 중복 구현하는 것은 아닌가?
 
 위 질문에 명확히 답하지 못하는 기능은 MVP에서 제외한다.

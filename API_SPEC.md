@@ -1,44 +1,39 @@
-# 지금 — 앱·CLI 공통 계산 API 명세 v0.1
+# 지금 — MCP 서비스용 백엔드 계산 API 명세 v0.1
 
-- 작성일: 2026-09-12
-- 상태: **구현을 위한 계약 초안**. 현재 서버가 구현·배포됐다는 뜻은 아니다.
-- 기준: `IDEA.md`의 2인·4일 MVP. 본인은 앱, 친구는 서버·AI·교통 데이터를 담당한다. 월요일 멘토링에서 앱 서비스 또는 CLI 제출을 결정한다.
-- 목적: 본인은 동일한 JSON으로 클라이언트를 먼저 만들고, 친구는 그 형식으로 실제 서버를 구현한다. CLI 선택 시 본인이 CLI 입출력·패키징을 맡는다.
-- 현재 계약 범위: REST/JSON 기반 요청별 계산 API. 기존 로컬 저장·로그인 없는 계약은 CLI 및 초기 통합용 기준이며, 앱 서비스의 UserData 저장 계약을 대체하지 않는다.
-- 예제 파일: [Docs/api/examples.json](Docs/api/examples.json)
-- 모든 예제는 **가상 역·가상 운행 데이터**이며 `meta.is_demo=true`다. 실제 서울 운행 정보로 사용하지 않는다.
-
-### IDEA.md 변경 반영과 조건부 개정
-
-- 앱 서비스 선택 시 Supabase PostgreSQL에 UserData를 저장한다. 구현 전 저장 항목, 사용자 식별·인증·접근 권한·삭제, 저장·조회 API와 예제 JSON을 공동 개정해야 한다. 현재 6개 계산 API만으로 앱 서비스의 데이터 저장 요구까지 구현됐다고 간주하지 않는다.
-- 본문의 앱·로컬 저장 표현은 기존 계산 흐름을 설명한다. CLI에는 해당 흐름을 명령·확인 프롬프트·로컬 기록으로 적용하며, 앱 서비스에서는 DB와 로컬 캐시의 관계를 추가로 확정한다. 모바일 전용 알림은 CLI 필수 범위가 아니다.
-- 서버 내부에서 MainAgent가 SubAgent를 지휘하고, 각 SubAgent는 역할에 따라 하나 이상의 기존 Skill을 사용한다. 공개 JSON 계약과 코드 기반 시간 계산은 유지한다.
-- 백엔드는 FastAPI, Docker는 컨테이너 패키징, Cloud Run은 백엔드 실행·배포 환경이다. 교통 데이터는 발급 완료된 키로 서울시 공공데이터 포털·공공데이터 포털 API를 호출한다. 개별 API 기능·실시간성·지원 범위는 실제 응답으로 검증한다.
-- 앱 서비스의 PostgreSQL 5432 연결은 서버→DB 연결이다. 앱·CLI의 HTTPS API 연결 및 Cloud Run의 HTTP PORT와 구분한다. 자격증명은 서버에서만 관리한다.
-- 두 개발자 모두 Spec Kit을 활용한다. 계약 변경은 함께 합의하고 본 문서·예제 JSON을 갱신한다.
+- 작성일: 2026-09-12 / 제품 방향 설명 갱신: 2026-09-14
+- 상태: **구현을 위한 계약 초안**. 실행·배포 완료를 의미하지 않는다.
+- 제품: 지금은 MCP로 제공한다. Hermes는 개발·시연용 MCP 클라이언트이며 독립 사용자 클라이언트를 만들지 않는다.
+- 담당: 본인은 MCP 도구·Hermes 연결·확인/선택 흐름·시연, 친구는 FastAPI·서비스 Agent·교통 데이터·계산·배포.
+- 범위: MCP 연결 계층이 호출하는 REST/JSON 요청별 계산 API. 이 문서 자체는 MCP 프로토콜 계약이 아니다.
+- 이번 정정은 제품 형태·담당·사용 흐름의 설명 변경이다. 기존 경로·필드·상태·오류·JSON 예제는 유지한다.
+- 예제 파일: [Docs/api/examples.json](Docs/api/examples.json). 모든 예제는 가상 역·가상 운행 데이터이며 meta.is_demo=true다.
 
 ## 1. 책임과 적용 범위
 
-서버는 장소 조회, 자연어 구조화, 교통 데이터 조회, 코드 기반 시간 계산, 사용자 요청 재탐색을 수행한다. 앱은 입력·확인, 결과 표시, 계획 선택, 로컬 저장, 수동 출발·도착·취소, 선택 구현인 로컬 알림을 담당한다.
+Hermes는 사용자와 대화하고 MCP 도구를 호출한다. MCP 연결 계층은 구조화 입력 검증, REST 요청, 결과·오류 전달을 맡는다. 이 문서의 '연동 계층'은 MCP 서버와 Hermes의 입력·확인·결과 전달 흐름을 통칭하며, 양쪽의 세부 상태 소유권은 구현 전에 합의한다.
 
-앱 실행용 AI 호출은 서버 내부 구현이다. 앱은 Solar API 키나 Timely 내부 파일 경로를 사용하지 않는다. Hermes의 개발 모델 설정은 이 HTTP 계약과 별개다. 실제 모델명·제공처·엔드포인트는 접근 권한과 대회 조건을 확인해 설정한다.
+FastAPI는 장소 조회, 자연어 구조화, 교통 조회, 코드 기반 시간 계산, 사용자 요청 재탐색을 수행한다. 내부 MainAgent가 SubAgent를 지휘하고 필요한 Skill을 사용한다. Docker·Cloud Run과 기존 JSON 계산 계약을 유지한다.
 
-이 계산 API 초안에는 Journey CRUD와 사용자 계정 API를 정의하지 않는다. 앱 서비스 선택 시 UserData 저장·인증에 필요한 계약을 별도 개정한다. 실시간 GPS 업로드, Push 등록, Calendar 동기화, 택시비 상한선·택시 경로 최적화, 자동 재탐색은 이번 MVP에서 보류한다.
+Hermes의 개발·시연 모델은 Solar Pro4다. 백엔드의 AI 호출 설정은 별도 검증한다. 교통·백엔드 AI 비밀키는 백엔드 실행 환경에서 관리하며 도구 응답·설정 예제·로그에 넣지 않는다.
 
-### 제출 형태에 따른 저장 구조
+별도 UserData DB·회원가입·영구 이동 이력·출발/도착 버튼·자동 알림은 현재 범위에 포함하지 않는다. Journey CRUD와 사용자 계정 API도 정의하지 않는다. GPS·Push·Calendar·택시 최적화·자동 재탐색은 보류한다.
 
-- **CLI·초기 통합: 로컬 저장 + 요청별 계산 서버.** 현재 예제와 저장 흐름의 기준이다.
-- **앱 서비스: Supabase UserData 저장 + 클라이언트 로컬 캐시.** 인증·권한·DB 저장 API와 데이터 기준을 구현 전에 합의하며, 고급 계정 동기화는 보류한다.
-- 모델이 자유 형식 문장만 반환하는 구조는 앱의 확인 UI와 예외 처리가 불안정하므로, 공개 응답은 아래 구조로 정규화한다.
+### 대화 문맥과 사용자 확인
 
-장소 제공처의 ID를 해석하는 Adapter나 짧은 캐시는 사용할 수 있다. 다만 앱 재시작·서버 재시작 뒤에도 이전 대화를 서버가 기억한다고 가정하지 않는다.
+- 기본 범위는 현재 대화의 초안·확인 조건·선택 계획이다. 서버는 과거 대화를 영구 저장하지 않는다.
+- 필요한 context와 이전 계획 요약을 후속 요청에 명시적으로 전달한다. 재시작 후 자동 복원을 약속하지 않는다.
+- ready_for_plan=true는 사용자 동의가 아니다. 최종 조건과 실제 사용자 확인 응답을 연결하고 조건 변경 시 재확인한다.
+- user_confirmed=true를 모델이 생성하는 것만으로 동의 검증이 완성됐다고 보지 않는다. 구체적 강제 방식은 공동 설계·검증한다.
+- 새 계획 조회와 적용을 구분하고 사용자가 후보를 선택한 뒤 현재 선택을 갱신한다.
+- 공개 응답은 아래 JSON 구조를 유지한다. 자유 서술로 데이터·오류를 대체하지 않는다.
+- MCP 스키마·오류 매핑은 별도 합의하고 REST 계약 변경이 필요하면 본 문서와 예제 JSON을 함께 갱신한다.
 
 ## 2. 연결 규칙
 
 | 항목 | 계약 |
 |---|---|
 | Base URL | 배포 시 확정할 HTTPS 서버 주소 + `/api/v1` |
-| 앱 설정 | Base URL은 앱 환경 설정으로 주입. 실기기에서 개발 PC의 `localhost`를 사용하지 않는다. |
+| MCP 연결 설정 | Base URL은 MCP 서버 실행 환경에 주입한다. localhost는 MCP 프로세스가 실행되는 호스트 기준이며 원격 백엔드 주소와 구분한다. |
 | GET 요청 | `Accept: application/json` |
 | POST 요청 | `Content-Type: application/json`, `Accept: application/json` |
 | 문자·필드 | UTF-8, JSON 필드명은 snake_case |
@@ -50,18 +45,18 @@
 | 선택값 | 문서에서 nullable로 명시한 필드만 null 허용 |
 | 성공/업무 결과 | HTTP 200 + status로 분기 |
 | 전송·검증·장애 | HTTP 4xx/5xx + status=error |
-| 인증 | 현재 계산 계약은 로그인 없는 CLI·초기 통합 기준. 앱 서비스는 UserData 접근을 위한 인증 계약을 먼저 추가한다. 클라이언트에 고정 비밀 키를 넣어 인증을 대신하지 않는다. 서버 호출 제한은 적용한다. |
+| 인증 | 이 초안은 사용자 계정 API를 정의하지 않는다. 공개 배포의 접근 제어·호출 제한은 별도 확인한다. 설정 예제나 사용자 대화에 고정 비밀키를 노출하지 않는다. |
 
-해석의 상대 날짜는 요청의 `reference_time`을 기준으로 계산한다. 실제 경로 계획·재탐색의 현재 시각은 **서버 시각**이다. 앱이 시뮬레이션 시각을 보내 실제 운행 계산을 과거로 돌리는 기능은 제공하지 않는다.
+해석의 상대 날짜는 요청의 `reference_time`을 기준으로 계산한다. 실제 경로 계획·재탐색의 현재 시각은 **서버 시각**이다. 연동 계층이 시뮬레이션 시각을 보내 실제 운행 계산을 과거로 돌리는 기능은 제공하지 않는다.
 
 ## 3. API 목록
 
 아래 경로는 Base URL 뒤에 붙인다.
 
-| Method | 경로 | 사용 시점 | 앱이 사용하는 결과 |
+| Method | 경로 | 사용 시점 | 연동 계층이 사용하는 결과 |
 |---|---|---|---|
 | GET | `/health` | 설치·배포 확인 | API 서버 응답 여부 |
-| GET | `/capabilities` | 앱 시작·지원 여부 갱신 | 막차·장소·AI 지원 상태, 기본값, 제한 |
+| GET | `/capabilities` | 연동 계층 시작·지원 여부 갱신 | 막차·장소·AI 지원 상태, 기본값, 제한 |
 | GET | `/places?query=...` | 장소 확인·검색 | 선택 가능한 실제 장소 후보 |
 | POST | `/mobility/interpret` | 자연어 입력·확인 답변 | 이동 조건 초안, 부족한 필드, 최대 3개 질문 |
 | POST | `/journeys/plan` | 사용자가 이동 조건 확인 후 계산 | 후보 경로 1~3개, 권장 출발시각·근거 |
@@ -71,12 +66,12 @@
 
 모든 응답은 `status`, `data`, `error`, `meta`를 포함한다. 성공 응답에서도 error 키를 생략하지 않고 null로 둔다.
 
-| status | HTTP | data | error | 앱 처리 |
+| status | HTTP | data | error | 연동 계층 처리 |
 |---|---|---|---|---|
 | ok | 200 | 해당 API 결과 | null | 결과 표시 |
-| needs_confirmation | 200 | 해석 초안·질문 | null | 입력 확인 UI 표시 |
+| needs_confirmation | 200 | 해석 초안·질문 | null | 입력 확인 질문 전달 |
 | unavailable | 200 | null | 업무 사유 | 미지원·데이터 부족·경로 없음 안내 |
-| error | 4xx/5xx | null | 오류 정보 | 수정 또는 재시도 UI |
+| error | 4xx/5xx | null | 오류 정보 | 수정 또는 재시도 안내 |
 
 `needs_confirmation`은 입력 해석 API가 반환한다. 계산 API에 잘못된 필수 필드를 보냈다면 조용히 보완하지 않고 HTTP 422를 반환한다.
 
@@ -87,7 +82,7 @@
 | request_id | string | 서버가 발급하는 요청 추적 ID |
 | server_time | datetime | 응답 생성 시 서버 시각 |
 | api_version | string | v1 |
-| is_demo | boolean | 가상 데이터 사용 여부. true인 결과는 앱에 시연 데이터 표시 |
+| is_demo | boolean | 가상 데이터 사용 여부. true인 결과는 연동 계층에 시연 데이터 표시 |
 
 `is_demo`는 클라이언트 요청 옵션이 아니다. 별도 개발/시연 환경에서만 true 결과를 반환한다. 실제 데이터 조회 실패 시 운영 서버가 임의로 Demo 결과로 전환해서는 안 된다.
 
@@ -95,14 +90,14 @@
 
 | 필드 | 타입 | 의미 |
 |---|---|---|
-| code | string | 앱 분기용 안정적인 오류 코드 |
+| code | string | 연동 계층 분기용 안정적인 오류 코드 |
 | message | string | 사용자에게 보여줄 한국어 안내 |
 | retryable | boolean | 같은 입력으로 나중에 재시도할 수 있는지 |
 | details | array | 필드별 오류 목록. 없으면 [] |
 | details[].field | string | 예: trip.arrival_preference_minutes |
 | details[].reason | string | 예: OUT_OF_RANGE |
 
-앱은 `message` 문자열 비교로 로직을 분기하지 않는다. 내부 스택·제공처 비밀 값·API 키는 응답에 포함하지 않는다.
+연동 계층은 `message` 문자열 비교로 로직을 분기하지 않는다. 내부 스택·제공처 비밀 값·API 키는 응답에 포함하지 않는다.
 
 ## 5. 서버 상태와 기능 지원
 
@@ -131,13 +126,13 @@ API 프로세스가 요청에 응답하는지 확인한다. 교통 API·모델�
 
 ### GET /capabilities
 
-실제 서버 설정과 확인된 제공처 기능을 반환한다. `available=false`인 기능을 앱이 숨기거나 제한 사유를 안내할 수 있게 한다. 막차가 true여도 모든 서울 경로 지원을 뜻하지 않으며 요청별 범위 검증은 계산 API에서 다시 수행한다.
+실제 서버 설정과 확인된 제공처 기능을 반환한다. `available=false`인 기능을 연동 계층이 숨기거나 제한 사유를 안내할 수 있게 한다. 막차가 true여도 모든 서울 경로 지원을 뜻하지 않으며 요청별 범위 검증은 계산 API에서 다시 수행한다.
 
 | data 필드 | 타입 | 설명 |
 |---|---|---|
 | timezone | string | Asia/Seoul |
 | place_search.available | boolean | 장소 검색 가능 |
-| interpretation.available | boolean | 자연어 구조화 가능. false여도 수동 폼 입력 허용 |
+| interpretation.available | boolean | 자연어 구조화 가능. false여도 명시적 조건 입력 허용 |
 | appointment.available | boolean | 약속 경로 계산 가능 |
 | appointment.time_basis | enum | arrival_time_search / departure_time_search / unsupported |
 | last_journey.available | boolean | 검증 가능한 막차 기능 유무 |
@@ -145,12 +140,12 @@ API 프로세스가 요청에 응답하는지 확인한다. 교통 API·모델�
 | last_journey.service_date_from / to | date 또는 null | 검증 데이터의 날짜 범위. 미지원일 때 null |
 | transport_modes | enum[] | 허용 대중교통 모드. subway / bus |
 | max_options | integer | 이번 버전은 3 |
-| defaults.arrival_preference_minutes | integer | 미지정 시 제안할 값. 초기 0, 확인 화면에 표시 |
-| defaults.transport_modes | enum[] | 초기 subway, bus. 확인 화면에 표시 |
+| defaults.arrival_preference_minutes | integer | 미지정 시 제안할 값. 초기 0, 확인 대화에 표시 |
+| defaults.transport_modes | enum[] | 초기 subway, bus. 확인 대화에 표시 |
 | buffer_policy.version / label | string | 실제 적용 규칙의 버전·이름 |
 | limitations | string[] | 사용자에게 표시할 추가 제약 |
 
-자연어를 해석하지 못하는 환경에서도 앱은 장소·시각 수동 입력 후 계산을 요청할 수 있다. `departure_time_search`만 가능하면 서버가 지원하는 미래 출발시각 조회를 이용해 역산·검증한다. 현재 ETA만 얻는 API를 도착시각 기반 조회라고 표시하지 않는다.
+자연어를 해석하지 못하는 환경에서도 연동 계층은 장소·시각 수동 입력 후 계산을 요청할 수 있다. `departure_time_search`만 가능하면 서버가 지원하는 미래 출발시각 조회를 이용해 역산·검증한다. 현재 ETA만 얻는 API를 도착시각 기반 조회라고 표시하지 않는다.
 
 전체 예제: `capabilities`.
 
@@ -185,7 +180,7 @@ API 프로세스가 요청에 응답하는지 확인한다. 교통 API·모델�
 | latitude | number | 위도 -90~90 |
 | longitude | number | 경도 -180~180 |
 
-서버는 해당 제공처의 ID를 다시 해석할 수 있어야 한다. 임시 배열 순번을 ID로 쓰지 않는다. 앱은 ID를 분해하거나 직접 만들지 않는다.
+서버는 해당 제공처의 ID를 다시 해석할 수 있어야 한다. 임시 배열 순번을 ID로 쓰지 않는다. 연동 계층은 ID를 분해하거나 직접 만들지 않는다.
 
 서버가 검색 결과를 반환해도 사용자 선택 전에는 장소가 확정되지 않는다. 이미 사용자가 선택한 장소를 이유 없이 다시 선택하게 하지 않는다. 제공처가 모호한 지역 중심점만 반환했다면 출입구·POI 확인을 요청한다.
 
@@ -213,9 +208,9 @@ API 프로세스가 요청에 응답하는지 확인한다. 교통 API·모델�
 | text | 예 | string, 1~2000자. 새 요청 또는 확인 질문에 대한 답 |
 | reference_time | 예 | datetime. “오늘/내일” 해석 기준 |
 | timezone | 예 | Asia/Seoul |
-| context | 예 | TripDraft 또는 null. 이전 초안과 앱에서 수정·확정한 값을 보내야 함 |
+| context | 예 | TripDraft 또는 null. 이전 초안과 연동 계층에서 수정·확정한 값을 보내야 함 |
 
-서버는 대화를 영구 저장하지 않는다. 후속 요청은 이전 `data.draft`를 context에 포함한다. 앱의 장소 선택·시각 폼 수정은 해당 필드를 갱신해 전송한다. 서버가 반환한 초안의 확인된 값을 새 문장만 보고 덮어쓰지 않는다. 사용자가 명시적으로 조건을 바꾼 경우 해당 필드만 갱신·재확인한다.
+서버는 대화를 영구 저장하지 않는다. 후속 요청은 이전 `data.draft`를 context에 포함한다. 대화에서 확인한 장소·시각 수정은 해당 필드를 갱신해 전송한다. 서버가 반환한 초안의 확인된 값을 새 문장만 보고 덮어쓰지 않는다. 사용자가 명시적으로 조건을 바꾼 경우 해당 필드만 갱신·재확인한다.
 
 ### TripDraft
 
@@ -261,11 +256,11 @@ Question은 `field`, `type`, `prompt`, `options`를 포함한다.
 
 필수 필드가 남으면 status=needs_confirmation, ready_for_plan=false다. 시간 의미·목적지·출발지 순으로 막힌 항목을 우선 확인하되 명확한 값을 재질문하지 않는다.
 
-선호 적용 우선순위는 이번 이동에서 명시한 값 → 저장된 사용자 선호 → capabilities 기본값이다. 클라이언트는 저장된 도착 여유·이동수단을 새 TripDraft의 해당 필드에 채워 context로 보내며, 이번 이동의 명시적 값이 있으면 이를 우선한다. 앱 서비스의 선호 조회는 UserData 계약 개정 후 연결하고, CLI는 로컬 설정을 사용한다. 택시비 상한선은 수집하거나 전송하지 않는다.
+선호 적용 우선순위는 이번 이동의 명시 값 → 현재 문맥에서 사용자가 확인한 선호 → capabilities 기본값이다. 확인된 선호는 TripDraft에 채워 context로 보내되 이번 이동의 명시 값을 우선한다. 저장된 집 주소·선호나 UserData DB가 있다고 임의 가정하지 않는다. 택시비 상한선은 수집하거나 전송하지 않는다.
 
-장소·시각이 확정되면 여전히 미지정인 선택값은 capabilities의 기본값으로 채우고 applied_defaults와 summary에 표시한다. 예: 도착 여유 0분, 버스·지하철 허용. last_journey의 arrival_preference_minutes는 0이다. 클라이언트는 적용된 값까지 최종 확인 화면 또는 프롬프트에 보여준다.
+장소·시각이 확정되면 여전히 미지정인 선택값은 capabilities의 기본값으로 채우고 applied_defaults와 summary에 표시한다. 예: 도착 여유 0분, 버스·지하철 허용. last_journey의 arrival_preference_minutes는 0이다. 클라이언트는 적용된 값까지 최종 확인 대화에 보여준다.
 
-필수 정보가 완성되면 status=ok, ready_for_plan=true, missing_fields=[], questions=[]를 반환한다. 이 상태도 사용자의 최종 확인 버튼을 대체하지 않는다. 사용자가 확인한 뒤에만 /journeys/plan을 호출한다.
+필수 정보가 완성되면 status=ok, ready_for_plan=true, missing_fields=[], questions=[]를 반환한다. 이 상태도 사용자의 최종 확인 응답을 대체하지 않는다. 사용자가 확인한 뒤에만 /journeys/plan을 호출한다.
 
 응답 예:
 
@@ -361,9 +356,9 @@ Question은 `field`, `type`, `prompt`, `options`를 포함한다.
 | 필드 | 필수 | 설명 |
 |---|---|---|
 | trip | 예 | 아래 TripRequest |
-| user_confirmed | 예 | true. 앱의 이동 조건 확인 후 요청 |
+| user_confirmed | 예 | true. 연동 계층의 이동 조건 확인 후 요청 |
 
-user_confirmed는 앱 흐름을 확인하는 값이며 인증이나 위·변조 방지 수단이 아니다.
+user_confirmed는 연동 계층 흐름을 확인하는 값이며 인증이나 위·변조 방지 수단이 아니다.
 
 ### TripRequest
 
@@ -414,7 +409,7 @@ last_journey는 요청한 운행일의 연결 가능한 마지막 여정을 계�
 | recommended_option_id | string | options 안의 한 option_id |
 | options | RouteOption[] | 성공이면 1~3개. 빈 배열 성공 금지 |
 
-refresh_after는 제공처의 최신성 조건을 반영한다. 확정 정책이 없을 때 서버 기본값은 generated_at + 5분으로 설정하고 추후 조정 가능하게 한다. 앱은 이를 지나면 데이터 재확인을 안내하며, 유효성이 보장된 최신 정보라고 표시하지 않는다. 이 값만으로 백그라운드 자동 호출을 시작하지 않는다.
+refresh_after는 제공처의 최신성 조건을 반영한다. 확정 정책이 없을 때 서버 기본값은 generated_at + 5분으로 설정하고 추후 조정 가능하게 한다. 연동 계층은 이를 지나면 데이터 재확인을 안내하며, 유효성이 보장된 최신 정보라고 표시하지 않는다. 이 값만으로 백그라운드 자동 호출을 시작하지 않는다.
 
 ### RouteOption
 
@@ -447,7 +442,7 @@ appointment 판정은 원래 datetime 차이로 수행한다. 반올림된 숫�
 Buffer는 `policy_version: string`, `total_minutes: number`, `items: array`다.
 각 item은 `code: string`, `minutes: number ≥ 0`, `leg_id: string`, `reason: string`이다.
 
-**Buffer의 시간은 legs와 total_duration_minutes에 이미 반영되어 있다. 앱에서 다시 더하거나 권장 출발시각에서 다시 빼지 않는다.** items는 해당 대기·이동 구간에 포함된 추가 여유의 설명이며 합계는 total_minutes와 일치해야 한다. 같은 시간에 여러 여유 항목을 중복 배정하지 않는다.
+**Buffer의 시간은 legs와 total_duration_minutes에 이미 반영되어 있다. 연동 계층에서 다시 더하거나 권장 출발시각에서 다시 빼지 않는다.** items는 해당 대기·이동 구간에 포함된 추가 여유의 설명이며 합계는 total_minutes와 일치해야 한다. 같은 시간에 여러 여유 항목을 중복 배정하지 않는다.
 
 ### Leg
 
@@ -474,7 +469,7 @@ Warning은 `code: string`, `message: string`이다. 초기 코드는 DEMO_DATA, 
 - 첫 leg.departure_at = recommended_leave_at.
 - 마지막 leg.arrival_at = estimated_arrival_at.
 - 시간순으로 연결하며 구간 사이 대기는 wait leg로 명시한다.
-- 구간 duration_minutes는 datetime 차이의 분 값이다. 소수 허용. 앱 표시는 올림할 수 있다.
+- 구간 duration_minutes는 datetime 차이의 분 값이다. 소수 허용. 연동 계층 표시는 올림할 수 있다.
 - total_duration_minutes는 전체 datetime 차이로 구하고, 반올림 전 구간 합과 일치한다.
 - 막차는 recommended_leave_at ≤ hard_leave_at. 출발을 앞당기는 것만으로 환승 안전이 확보된다고 가정하지 않고 각 연결을 재검증한다.
 - 현재 시각만을 기반으로 받은 ETA를 미래 경로 또는 막차의 증거로 쓰지 않는다.
@@ -701,9 +696,9 @@ PlanSummary는 `plan_id`, `selected_option_id`, `recommended_leave_at`, `estimat
 
 서버는 이전 plan_id로 DB 조회하지 않는다. trip과 current_origin_place_id를 다시 검증해 현재 서버 시각 기준으로 새 경로를 계산한다. 응답 plan.trip.origin_place_id와 plan.origin은 **새 출발지**를 반영한다.
 
-previous_plan의 시각은 앱이 보낸 과거 비교 기준으로만 사용한다. 현재 경로의 운행·정확성 근거로 사용하지 않는다. 위조 여부를 보장하는 서버 저장 기록이 아니므로 추후 보안·공유 기능이 필요하면 별도 저장 모델을 도입한다.
+previous_plan의 시각은 연동 계층이 보낸 과거 비교 기준으로만 사용한다. 현재 경로의 운행·정확성 근거로 사용하지 않는다. 위조 여부를 보장하는 서버 저장 기록이 아니므로 추후 보안·공유 기능이 필요하면 별도 저장 모델을 도입한다.
 
-거절·취소 상태에서는 앱이 요청하지 않는다. reason=route_changed도 user_confirmed=true가 필요하다. 서버는 새 결과를 반환할 뿐 기존 로컬 계획을 자동 교체하지 않는다.
+거절·취소 상태에서는 연동 계층이 요청하지 않는다. reason=route_changed도 user_confirmed=true가 필요하다. 서버는 새 결과를 반환할 뿐 기존 로컬 계획을 자동 교체하지 않는다.
 
 ### 성공 응답 data
 
@@ -721,23 +716,23 @@ Comparison은 다음 필드다.
 - leave_change_minutes: 새 권장 출발 - 이전 선택 권장 출발의 분 차이. 양수=더 늦은 시각.
 - summary: 확인된 차이를 설명하는 한국어 문장.
 
-변화량 두 필드는 소수 분을 허용한다. 앱이 표시를 반올림하더라도 도착 상태 판정은 서버 값에 따른다. 사용자가 다른 후보를 선택하면 comparison은 그 후보의 비교가 아니므로 앱이 시각을 다시 비교하거나 해당 비교 문구를 숨긴다.
+변화량 두 필드는 소수 분을 허용한다. 연동 계층이 표시를 반올림하더라도 도착 상태 판정은 서버 값에 따른다. 사용자가 다른 후보를 선택하면 comparison은 그 후보의 비교가 아니므로 연동 계층이 시각을 다시 비교하거나 해당 비교 문구를 숨긴다.
 
 전체 예제 `replan_late`: 이전 도착 18:50 → 새 도착 19:10으로 20분 늦어지고, Deadline 19:00을 10분 초과한다.
 
-### 앱 로컬 적용
+### 사용자 선택 후 적용
 
-새 결과를 사용자가 선택하면 앱이 같은 local_journey_id의 선택 계획을 교체한다. 재탐색이 실패·취소되면 이전 기록을 삭제하지 않는다. 단, 이전 경로가 여전히 유효하다는 의미로 표시하지 않는다.
+새 결과를 사용자가 선택하면 현재 대화의 선택 계획을 갱신한다. 이 API는 기존 계획을 자동 교체하지 않는다. 재탐색 실패·취소는 이전 선택을 삭제하지 않으며, 이전 경로가 여전히 유효하다는 뜻으로 표시하지 않는다.
 
-이 버전의 재탐색은 매번 사용자가 요청한다. 자동 재제시 3회 정책을 수동 클릭 횟수 제한으로 잘못 적용하지 않는다. 향후 자동 재탐색을 추가할 때 주기·횟수·중복 사건 관리 API를 별도 설계한다.
+재탐색은 매번 사용자가 요청한다. 자동 재제시 3회 정책을 수동 요청 횟수 제한으로 적용하지 않는다. 영구 저장·출발/도착 상태 관리·알림 발송은 현재 MCP 계약에 포함하지 않는다.
 
-## 10. 오류·불가 사유와 앱 동작
+## 10. 오류·불가 사유와 연동 계층 동작
 
-| HTTP | status | code | 앱 동작 |
+| HTTP | status | code | 연동 계층 동작 |
 |---|---|---|---|
 | 400 | error | INVALID_JSON | 요청 형식 수정. 사용자 입력 재시도 반복 금지 |
 | 422 | error | VALIDATION_ERROR | details.field에 맞는 입력 오류 표시 |
-| 422 | error | USER_CONFIRMATION_REQUIRED | 이동 조건 확인 화면으로 이동 |
+| 422 | error | USER_CONFIRMATION_REQUIRED | 이동 조건 확인 대화로 돌아감 |
 | 422 | error | PLACE_NOT_RESOLVABLE | 이전 장소 ID를 해석할 수 없으므로 다시 검색·선택 |
 | 200 | unavailable | OUT_OF_SERVICE_AREA | 서울 또는 제공처 지원 범위 밖 안내 |
 | 200 | unavailable | APPOINTMENT_TIME_UNSUPPORTED | 요청한 시각 조건의 경로를 검증할 수 없음을 안내 |
@@ -745,11 +740,11 @@ Comparison은 다음 필드다.
 | 200 | unavailable | NO_FEASIBLE_JOURNEY | 지원 데이터에서 조건에 맞는 경로가 없음을 안내 |
 | 200 | unavailable | BUFFER_REQUIREMENT_NOT_MET | 요구한 여유를 확보한 막차 경로가 없음. 안전한 탑승을 단정하지 않음 |
 | 429 | error | RATE_LIMITED | Retry-After 헤더의 초만큼 재요청 대기 |
-| 503 | error | ROUTING_PROVIDER_UNAVAILABLE | 교통 조회 일시 실패. 재시도 버튼 |
-| 503 | error | PLACE_PROVIDER_UNAVAILABLE | 장소 검색 일시 실패. 재시도 버튼 |
-| 503 | error | AI_UNAVAILABLE | 자연어 해석 실패. 수동 입력 제공 |
+| 503 | error | ROUTING_PROVIDER_UNAVAILABLE | 교통 조회 일시 실패. 재시도 안내 |
+| 503 | error | PLACE_PROVIDER_UNAVAILABLE | 장소 검색 일시 실패. 재시도 안내 |
+| 503 | error | AI_UNAVAILABLE | 자연어 해석 실패. 명시적 조건 입력 안내 |
 | 502 | error | UPSTREAM_RESPONSE_INVALID | 제공처·모델 결과 검증 실패. 잘못된 경로·시간을 표시하지 않음 |
-| 504 | error | UPSTREAM_TIMEOUT | 외부 요청 시간 초과. 재시도 버튼 |
+| 504 | error | UPSTREAM_TIMEOUT | 외부 요청 시간 초과. 재시도 안내 |
 | 500 | error | INTERNAL_ERROR | 일반 오류 안내와 request_id 제공 |
 
 최소 서버에서 위 오류 코드가 발생하는 지점을 명시적으로 매핑한다. 존재하지 않는 경로·메서드도 JSON envelope를 유지하며 각각 404 NOT_FOUND, 405 METHOD_NOT_ALLOWED를 반환한다.
@@ -782,53 +777,36 @@ Comparison은 다음 필드다.
 
 unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한계다. 자동 재시도로 해결된다고 표시하지 않는다. `NO_FEASIBLE_JOURNEY`는 제공처가 검증한 범위에서의 결과이며 서울 전체의 모든 대안이 없다는 보장이 아니다.
 
-## 11. 호출 순서와 앱 상태
+## 11. MCP 호출 순서와 대화 상태
 
-1. 앱 시작 시 /capabilities를 읽어 기능·기본값·지원 범위를 확인한다.
-2. 사용자가 자연어를 입력하면 /mobility/interpret를 호출한다.
-3. 장소 질문은 /places 검색 결과 선택 UI로 처리한다.
-4. 앱이 context를 갱신해 /mobility/interpret를 다시 호출하거나, 완성된 수동 폼을 직접 검증한다.
-5. 최종 확인 화면에서 사용자 동의를 받은 뒤 /journeys/plan을 호출한다.
-6. 후보를 선택해 앱 로컬에 Plan 전체와 선택한 option_id를 저장한다.
-7. 출발·도착 버튼은 로컬 상태를 변경한다.
-8. 재탐색은 /journeys/replan 호출 후 결과 확인·선택을 거쳐 로컬 계획을 갱신한다.
+1. get_capabilities로 /capabilities의 기능·기본값·지원 범위를 확인한다.
+2. interpret_trip으로 /mobility/interpret를 호출한다.
+3. search_places로 /places 후보를 받고 사용자에게 선택을 요청한다.
+4. 확인한 값으로 context를 갱신한다. 명확히 입력된 값은 임의 변경하지 않는다.
+5. Hermes 대화에서 최종 조건을 요약하고 사용자 동의를 받은 뒤 plan_journey로 /journeys/plan을 호출한다.
+6. 사용자가 선택한 Plan과 option_id를 현재 대화의 선택 계획으로 관리한다.
+7. replan_journey로 /journeys/replan을 호출하고 새 후보에 대한 사용자 선택 후에만 계획을 갱신한다.
 
-수동 폼 사용 시 /interpret는 필수가 아니다. 서버는 /plan의 필수 조건을 동일하게 검증한다.
+필수 조건을 직접 입력해 검증할 수 있다면 /interpret를 생략할 수 있다. /plan의 필수 조건과 사용자 확인 요구는 동일하다.
 
-### 로컬 저장 모델 예시
-
-이 모델은 서버 API가 아니라 앱 내부 합의다.
-
-| 필드 | 설명 |
-|---|---|
-| local_journey_id | 앱 생성 UUID |
-| selected_plan | Plan 전체 |
-| selected_option_id | 선택한 경로 후보 |
-| state | scheduled / departed / arrived / cancelled |
-| created_at / updated_at | 날짜·시간대 포함 시각 |
-| last_calculation_request_id | 문제 추적용 서버 request_id |
-| notification_id | 로컬 알림을 구현했다면 기기 알림 ID, 아니면 null |
-
-최초 저장은 scheduled, 출발 버튼은 departed, 도착 버튼은 arrived, 취소는 cancelled로 처리한다. 미출발 상태에서 사용자가 직접 도착을 확인할 수도 있다. arrived/cancelled는 종료 상태이며 자동 재탐색·출발 알림을 하지 않는다. 종료 기록을 다시 사용하려면 새 이동으로 등록한다. 재탐색 성공만으로 departed를 scheduled로 되돌리지 않는다.
-
-선택 계획이 수정·취소·종료되면 기존 로컬 알림을 취소하거나 갱신한다. 서버가 알림을 발송한 것으로 표시하지 않는다. 앱 밖의 교통 변화를 감지하는 기능은 이번 API에 없다.
+문맥·확인·선택 상태의 실제 저장 위치와 수명은 구현 전에 공동 합의한다. 서버가 plan_id로 DB 복원을 수행한다고 가정하지 않는다. 과거의 Local Journey 영구 저장·상태 버튼·notification_id 모델은 현재 MCP 필수 계약이 아니다.
 
 ## 12. 시간 초과·재시도·중복 요청
 
 - 서버 처리 제한 초안: health/capabilities 3초, places 10초, interpret/plan/replan 25초.
-- 앱 대기 제한: GET 15초, POST 30초. 실제 제공처 제약으로 바꿔야 하면 두 담당자가 함께 수정한다.
+- 연동 계층 대기 제한: GET 15초, POST 30초. 실제 제공처 제약으로 바꿔야 하면 두 담당자가 함께 수정한다.
 - rate limit의 Retry-After는 정수 초로 반환한다.
-- 앱은 버튼 중복 클릭을 막고 로딩 상태를 표시한다.
-- 입력이 바뀐 뒤 이전 요청이 늦게 도착하면 새 상태를 덮어쓰지 않는다. 앱에서 요청 순번 또는 취소로 처리한다.
+- 연동 계층은 중복 계산 요청을 막고 진행 상태를 전달한다.
+- 입력이 바뀐 뒤 이전 요청이 늦게 도착하면 새 상태를 덮어쓰지 않는다. 연동 계층에서 요청 순번 또는 취소로 처리한다.
 - POST는 자동 반복 호출하지 않고 사용자 재시도를 제공한다. 계산 요청은 서버 리소스를 생성하지 않지만 모델·교통 호출 비용이 발생할 수 있다.
 - 같은 계산을 다시 요청해도 현재 시각·교통 상태가 달라 결과가 바뀔 수 있다. plan_id 재사용이나 동일 응답을 보장하지 않는다.
-- 계산 중 네트워크가 끊기면 로컬 이동 기록은 유지하고 결과 미수신으로 표시한다.
+- 계산 중 네트워크가 끊기면 현재 선택 계획은 유지하고 결과 미수신으로 표시한다.
 
-## 13. 프론트엔드 Mock 예제 사용
+## 13. MCP 연동 Mock 예제 사용
 
-[examples.json](Docs/api/examples.json)은 요청, HTTP 상태, 완전한 응답을 case별로 묶었다. 실행 서버나 테스트 완료 결과가 아니라 **이 계약에 맞춰 앱을 개발하기 위한 fixture**다.
+[examples.json](Docs/api/examples.json)은 요청, HTTP 상태, 완전한 응답을 case별로 묶었다. 실행 서버나 테스트 완료 결과가 아니라 **이 계약에 맞춰 연동 계층을 개발하기 위한 fixture**다.
 
-| case id | 확인할 화면 |
+| case id | 확인할 도구 결과 |
 |---|---|
 | health | 서버 연결 |
 | capabilities | 기능 지원·기본값 |
@@ -844,18 +822,18 @@ unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한
 | provider_unavailable | 서버 제공처 장애·재시도 |
 | confirmation_required | 확인 없이 계산을 요청한 오류 |
 
-앱은 Mock 모드에서 case.response와 case.http_status를 사용한다. 실제 호출로 전환할 때 JSON 구조와 화면 분기 코드는 유지하고 Base URL/데이터 연결 부분만 바꾼다. 예제의 날짜는 고정이므로 Mock 시간도 해당 meta.server_time으로 맞춘다. 실제 서버 계산의 현재 시각을 예제 날짜로 바꾸지 않는다.
+연동 계층은 Mock 모드에서 case.response와 case.http_status를 사용한다. 실제 호출로 전환할 때 JSON 구조와 결과 분기 코드는 유지하고 Base URL/데이터 연결 부분만 바꾼다. 예제의 날짜는 고정이므로 Mock 시간도 해당 meta.server_time으로 맞춘다. 실제 서버 계산의 현재 시각을 예제 날짜로 바꾸지 않는다.
 
 ## 14. 두 사람의 구현·검증 순서
 
 ### 첫날 합의할 사항
 
 - 이 명세의 공개 경로와 응답 키를 두 사람이 함께 고정한다.
-- 본인은 examples.json으로 확인·결과·오류 화면을 만든다. CLI 선택 시 동일한 입력·출력을 명령과 프롬프트로 제공한다.
+- 본인은 examples.json으로 MCP 도구 결과·오류 매핑과 Hermes 확인·선택 흐름을 검증한다.
 - 친구는 /health, /capabilities와 장소·교통 데이터 검증부터 진행한다.
 - 자연어 모델이 아직 연결되지 않아도 본인은 수동 입력으로 /journeys/plan 통합을 준비할 수 있다.
-- 첫날 끝에 클라이언트에서 배포 서버를 호출한다. 앱 형태로 확정되면 설치 앱, CLI 형태로 확정되면 CLI에서 검증한다.
-- 앱 서비스로 확정하면 UserData·인증·권한·저장 계약을 공동 개정한 뒤 서버와 클라이언트에 연결한다.
+- 첫날 Hermes → MCP → FastAPI 호출을 검증하고 배포 서버의 실제 연결 여부를 별도로 기록한다.
+- MCP 스키마·오류 전달·사용자 확인·대화 상태의 소유권을 합의한다. REST 계약 변경은 본 문서와 fixture를 함께 갱신한다.
 
 ### 의미 있는 계약 검증
 
@@ -867,10 +845,10 @@ unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한
 6. 막차 운행일과 다음 날 도착시각을 올바르게 처리한다.
 7. 미지원 데이터와 실제 검색 결과 경로 없음이 다른 코드다.
 8. 재탐색의 양수 arrival_change_minutes는 더 늦은 도착이다.
-9. 실패한 재탐색이 기존 로컬 기록을 지우지 않는다.
+9. 실패한 재탐색이 기존 선택 계획을 지우지 않는다.
 10. 실제 제공처 장애 시 Demo 경로로 자동 대체하지 않는다.
 
-변경이 필요하면 명세와 fixture를 함께 수정한다. 실제 데이터 제공처가 바뀌어도 앱 공개 계약을 유지하는 Adapter를 구현한다.
+변경이 필요하면 명세와 fixture를 함께 수정한다. 실제 데이터 제공처가 바뀌어도 연동 계층 공개 계약을 유지하는 Adapter를 구현한다.
 
 ## 15. 구현 전에 확정할 환경 값
 
@@ -881,7 +859,7 @@ unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한
 - 지원 지역·노선·운행일 범위.
 - 미래 시각 검색 방식과 막차 검증 가능 여부.
 - 실제 Buffer 정책 버전과 수치.
-- 앱 실행용 AI 모델 ID·호출 경로.
+- 백엔드 실행용 AI 모델 ID·호출 경로.
 - 호출 제한과 제공처별 최신성 기준.
 
 미확정 값을 실제 지원 기능처럼 하드코딩하지 않는다. capabilities에서 검증된 상태를 반환하고 불가능한 요청은 정의한 불가 사유로 응답한다.
