@@ -362,6 +362,21 @@ def _capabilities_demo() -> dict[str, Any]:
     return CAPABILITIES_DEMO_RESPONSE
 
 
+def _parse_timeout_env(raw: str | None, default_seconds: int) -> int:
+    """JIGEUM_API_TIMEOUT 파싱 헬퍼.
+
+    - 설정되지 않았거나 빈 문자열이면 default_seconds를 사용한다.
+    - 유효한 정수 문자열이면 해당 값을 사용한다.
+    - 파싱 불가능한 값은 예외를 전파하지 않고 default_seconds로 대체한다.
+    """
+    if raw is None or raw == "":
+        return default_seconds
+    try:
+        return int(raw)
+    except ValueError:
+        return default_seconds
+
+
 def _capabilities_http(base_url: str, timeout_seconds: int = 15) -> dict[str, Any]:
     """HTTP 모드: Base URL + /capabilities 호출.
 
@@ -374,7 +389,9 @@ def _capabilities_http(base_url: str, timeout_seconds: int = 15) -> dict[str, An
         raise RuntimeError("JIGEUM_API_BASE_URL이 설정되지 않았습니다.")
 
     url = base_url.rstrip("/") + "/capabilities"
-    timeout = int(os.environ.get("JIGEUM_API_TIMEOUT", str(timeout_seconds)))
+    timeout = _parse_timeout_env(
+        os.environ.get("JIGEUM_API_TIMEOUT"), timeout_seconds
+    )
 
     try:
         resp = httpx.get(url, timeout=timeout, headers={"Accept": "application/json"})
