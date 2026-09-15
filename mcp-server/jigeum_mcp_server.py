@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 import httpx
+import json
 from mcp.server.mcpserver import MCPServer
 
 # ---------------------------------------------------------------------------
@@ -55,8 +56,189 @@ def _request_id() -> str:
 
 
 # ---------------------------------------------------------------------------
-# MCP 서버
+# interpret_trip 데모 응답 — Docs/api/examples.json 의 interpret 케이스 2건 계약
+# (백엔드·AI·장소 검색 없이 서버에서 자급하는 결정적 시연 응답)
 # ---------------------------------------------------------------------------
+
+INTERPRET_NEEDS_CONFIRMATION_REQUEST: dict[str, Any] = {
+    "text": "오늘 오후 7시까지 테스트 B역 2번 출구에 도착해야 해. 집에서 출발할 거야.",
+    "reference_time": "2026-09-13T18:00:00+09:00",
+    "timezone": "Asia/Seoul",
+    "context": None,
+}
+
+INTERPRET_NEEDS_CONFIRMATION_RESPONSE: dict[str, Any] = {
+    "status": "needs_confirmation",
+    "data": {
+        "draft": {
+            "kind": "appointment",
+            "origin": {
+                "query": "집",
+                "place": None,
+                "confirmed": False,
+            },
+            "destination": {
+                "query": "테스트 B역 2번 출구",
+                "place": None,
+                "confirmed": False,
+            },
+            "arrival_deadline": "2026-09-13T19:00:00+09:00",
+            "arrival_preference_minutes": None,
+            "service_date": None,
+            "transport_modes": None,
+            "ambiguities": [],
+        },
+        "ready_for_plan": False,
+        "missing_fields": ["origin.place_id", "destination.place_id"],
+        "questions": [
+            {
+                "field": "origin.place_id",
+                "type": "place_search",
+                "prompt": "출발 기준으로 사용할 가까운 역·정류장이나 건물 출입구를 선택해 주세요.",
+                "options": [],
+            },
+            {
+                "field": "destination.place_id",
+                "type": "place_search",
+                "prompt": "테스트 B역 2번 출구의 검색 결과를 선택해 주세요.",
+                "options": [],
+            },
+        ],
+        "applied_defaults": [],
+        "summary": "도착 마감은 오늘 19:00입니다. 출발지와 목적지의 위치 선택이 필요합니다.",
+    },
+    "error": None,
+    "meta": {
+        "request_id": "fixture-interpret_needs_confirmation",
+        "server_time": "2026-09-13T18:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+INTERPRET_READY_REQUEST: dict[str, Any] = {
+    "text": "이동 조건을 정리해줘.",
+    "reference_time": "2026-09-13T18:00:00+09:00",
+    "timezone": "Asia/Seoul",
+    "context": {
+        "kind": "appointment",
+        "origin": {
+            "query": "테스트 A역 1번 출구",
+            "place": {
+                "place_id": "fixture:place-a",
+                "name": "테스트 A역 1번 출구",
+                "address": "서울 내 가상 출발 지점",
+                "latitude": 37.5,
+                "longitude": 126.95,
+            },
+            "confirmed": True,
+        },
+        "destination": {
+            "query": "테스트 B역 2번 출구",
+            "place": {
+                "place_id": "fixture:place-b",
+                "name": "테스트 B역 2번 출구",
+                "address": "서울 내 가상 도착 지점",
+                "latitude": 37.51,
+                "longitude": 127.02,
+            },
+            "confirmed": True,
+        },
+        "arrival_deadline": "2026-09-13T19:00:00+09:00",
+        "arrival_preference_minutes": 10,
+        "service_date": None,
+        "transport_modes": ["subway", "bus"],
+        "ambiguities": [],
+    },
+}
+
+INTERPRET_READY_RESPONSE: dict[str, Any] = {
+    "status": "ok",
+    "data": {
+        "draft": {
+            "kind": "appointment",
+            "origin": {
+                "query": "테스트 A역 1번 출구",
+                "place": {
+                    "place_id": "fixture:place-a",
+                    "name": "테스트 A역 1번 출구",
+                    "address": "서울 내 가상 출발 지점",
+                    "latitude": 37.5,
+                    "longitude": 126.95,
+                },
+                "confirmed": True,
+            },
+            "destination": {
+                "query": "테스트 B역 2번 출구",
+                "place": {
+                    "place_id": "fixture:place-b",
+                    "name": "테스트 B역 2번 출구",
+                    "address": "서울 내 가상 도착 지점",
+                    "latitude": 37.51,
+                    "longitude": 127.02,
+                },
+                "confirmed": True,
+            },
+            "arrival_deadline": "2026-09-13T19:00:00+09:00",
+            "arrival_preference_minutes": 10,
+            "service_date": None,
+            "transport_modes": ["subway", "bus"],
+            "ambiguities": [],
+        },
+        "ready_for_plan": True,
+        "missing_fields": [],
+        "questions": [],
+        "applied_defaults": [],
+        "summary": "오늘 19:00까지 테스트 B역 2번 출구 도착, 10분 전 도착 선호",
+    },
+    "error": None,
+    "meta": {
+        "request_id": "fixture-interpret_ready",
+        "server_time": "2026-09-13T18:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+
+def _request_matches(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    return (
+        a.get("text") == b.get("text")
+        and a.get("reference_time") == b.get("reference_time")
+        and a.get("timezone") == b.get("timezone")
+        and _json_stable(a.get("context")) == _json_stable(b.get("context"))
+    )
+
+
+def _json_stable(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=True)
+
+
+def _validate_interpret_text(raw: Any) -> str:
+    """interpret_trip의 text 투입 계약 검증.
+
+    - 필수 문자열
+    - 1~2000자
+    """
+    if not isinstance(raw, str) or raw == "":
+        raise RuntimeError("text는 필수 문자열입니다.")
+    if len(raw) > 2000:
+        raise RuntimeError("text는 2000자 이하여야 합니다.")
+    return raw.strip()
+
+
+def _interpret_demo(request: dict[str, Any]) -> dict[str, Any]:
+    """examples.json interpret 케이스 2건과 정확히 일치할 때만 해당 응답을 반환.
+
+    그 외 입력은 동일한 setup에서 input validation을 통과한 경우,
+    계약된 데모 응답 중 interpret_needs_confirmation 응답을 기본값으로 반환한다.
+    실제 AI·장소 검색·대화 상태는 사용하지 않는다.
+    """
+    if _request_matches(request, INTERPRET_READY_REQUEST):
+        return INTERPRET_READY_RESPONSE
+    return INTERPRET_NEEDS_CONFIRMATION_RESPONSE
+
+
 server = MCPServer(
     name="jigeum",
     version="0.1.0",
@@ -188,6 +370,41 @@ def get_capabilities(mode: Literal["demo", "http"] = "demo") -> dict[str, Any]:
         retryable=False,
         details=[{"field": "mode", "reason": "OUT_OF_RANGE"}],
     )
+
+
+@server.tool(description="자연어 이동 요청을 구조화하고 부족한 조건을 확인한다. MCP 데모 응답을 위해 examples.json interpret 케이스 2건과 정확히 일치하는 요청에는 해당 fixture 응답을 반환한다.")
+def interpret_trip(text: str, reference_time: str, timezone: str, context: dict | None = None) -> dict[str, Any]:
+    """자연어 이동 요청을 구조화하고 부족한 조건을 확인한다.
+
+    Args:
+        text: 사용자 자연어 요청(1~2000자).
+        reference_time: 해석 기준 시각.
+        timezone: Asia/Seoul.
+        context: 이전 TripDraft 또는 null.
+
+    Returns:
+        API_SPEC 공통 응답 envelope: {status, data, error, meta}.
+        - examples.json interpret 케이스 2건과 일치하는 요청에만 해당 fixture 응답을 반환.
+        - 그 외 유효 입력: interpret_needs_confirmation 데모 응답을 반환.
+        - text 투입 계약 위반 시: VALIDATION_ERROR envelope 반환.
+        실제 AI·장소 검색·대화 상태는 사용하지 않는다.
+    """
+    try:
+        validated = _validate_interpret_text(text)
+    except RuntimeError as e:
+        return _error_envelope(
+            code="VALIDATION_ERROR",
+            message=str(e),
+            retryable=False,
+            details=[{"field": "text", "reason": "OUT_OF_RANGE"}],
+        )
+    request = {
+        "text": validated,
+        "reference_time": reference_time,
+        "timezone": timezone,
+        "context": context,
+    }
+    return _interpret_demo(request)
 
 
 async def main() -> None:
