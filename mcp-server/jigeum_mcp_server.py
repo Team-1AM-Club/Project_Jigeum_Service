@@ -1,4 +1,4 @@
-"""지금 MCP 서버 — stdio MCP 서버 (get_capabilities 도구 1개)."""
+"""지금 MCP 서버 — stdio MCP 서버 (get_capabilities, interpret_trip, search_places 도구)."""
 
 from __future__ import annotations
 
@@ -7,14 +7,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-import httpx
 import json
+import httpx
 from mcp.server.mcpserver import MCPServer
+
 
 # ---------------------------------------------------------------------------
 # 데모 fixture — Docs/api/examples.json 의 capabilities 케이스 응답
 # (백엔드 없이 standalone MCP 데모 실행을 위한 내장 응답)
 # ---------------------------------------------------------------------------
+
 CAPABILITIES_DEMO_RESPONSE: dict[str, Any] = {
     "status": "ok",
     "data": {
@@ -53,6 +55,114 @@ def _now_iso() -> str:
 
 def _request_id() -> str:
     return str(uuid.uuid4())
+
+
+# ---------------------------------------------------------------------------
+# search_places 데모 응답 — Docs/api/examples.json 의 places_found 케이스 계약
+# (백엔드·실제 장소 제공자 없이 서버에서 자급하는 결정적 시연 응답)
+# ---------------------------------------------------------------------------
+
+SEARCH_PLACES_DEMO_RESPONSE: dict[str, Any] = {
+    "status": "ok",
+    "data": {
+        "query": "테스트",
+        "places": [
+            {
+                "place_id": "fixture:place-a",
+                "name": "테스트 A역 1번 출구",
+                "address": "서울 내 가상 출발 지점",
+                "latitude": 37.5,
+                "longitude": 126.95,
+            },
+            {
+                "place_id": "fixture:place-b",
+                "name": "테스트 B역 2번 출구",
+                "address": "서울 내 가상 도착 지점",
+                "latitude": 37.51,
+                "longitude": 127.02,
+            },
+        ],
+        "source": {
+            "provider": "fixture",
+            "retrieved_at": "2026-09-13T18:00:00+09:00",
+        },
+        "has_more": False,
+    },
+    "error": None,
+    "meta": {
+        "request_id": "fixture-places_found",
+        "server_time": "2026-09-13T18:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+
+def _validate_search_places_query(raw: Any) -> str:
+    """search_places의 query 투입 계약 검증.
+
+    - 필수 문자열
+    - 앞뒤 공백 제거 후 1~100자
+    """
+
+    if not isinstance(raw, str):
+        raise RuntimeError("query는 필수 문자열입니다.")
+    query = raw.strip()
+    if query == "":
+        raise RuntimeError("query는 공백 제거 후 1자 이상이어야 합니다.")
+    if len(query) > 100:
+        raise RuntimeError("query는 공백 제거 후 100자 이하여야 합니다.")
+    return query
+
+
+def _validate_search_places_limit(raw: Any, default: int = 5) -> int:
+    """search_places의 limit 투입 계약 검증.
+
+    - 생략 시 기본 5
+    - 정수 1~10
+    - 그 외(0, 음수, 11 이상, 정수 아닌 값)는 VALIDATION_ERROR
+    """
+
+    if raw is None:
+        return default
+    # bool은 int의 서브클래스이므로 type()으로 엄격히 체크
+    if type(raw) is not int:
+        raise RuntimeError("limit는 정수여야 합니다.")
+    if raw < 1 or raw > 10:
+        raise RuntimeError("limit는 1~10의 정수여야 합니다.")
+    return raw
+
+
+def _search_places_demo(query: str, limit: int) -> dict[str, Any]:
+    """examples.json places_found 케이스와 정확히 일치하는 요청에는 해당 fixture
+    응답을 반환한다.
+
+    그 외 유효 입력은 빈 결과(places=[])를 반환한다.
+    실제 장소 제공자·좌표 새로 만들기를 사용하지 않는다.
+    """
+
+    normalized_query = (query or "").strip()
+    if normalized_query == "테스트" and limit == 5:
+        return SEARCH_PLACES_DEMO_RESPONSE
+    return {
+        "status": "ok",
+        "data": {
+            "query": normalized_query,
+            "places": [],
+            "source": {
+                "provider": "fixture",
+                "retrieved_at": "2026-09-13T18:00:00+09:00",
+            },
+            "has_more": False,
+        },
+        "error": None,
+        "meta": {
+            "request_id": _request_id(),
+            "server_time": _now_iso(),
+            "api_version": "v1",
+            "is_demo": True,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -267,13 +377,19 @@ def _capabilities_http(base_url: str, timeout_seconds: int = 15) -> dict[str, An
     try:
         resp = httpx.get(url, timeout=timeout, headers={"Accept": "application/json"})
     except httpx.ConnectError:
-        return _error_envelope("ROUTING_PROVIDER_UNAVAILABLE",
-                               "백엔드 서버에 연결할 수 없습니다. 잠시 후 다시 시도하거나 데모 모드를 사용하세요.",
-                               retryable=True, details=[{"field": "api_base_url", "reason": "CONNECTION_FAILED"}])
+        return _error_envelope(
+            "ROUTING_PROVIDER_UNAVAILABLE",
+            "백엔드 서버에 연결할 수 없습니다. 잠시 후 다시 시도하거나 데모 모드를 사용하세요.",
+            retryable=True,
+            details=[{"field": "api_base_url", "reason": "CONNECTION_FAILED"}],
+        )
     except httpx.TimeoutException:
-        return _error_envelope("UPSTREAM_TIMEOUT",
-                               "백엔드 응답이 지연되고 있습니다. 잠시 후 다시 시도하세요.",
-                               retryable=True, details=[{"field": "api_base_url", "reason": "TIMEOUT"}])
+        return _error_envelope(
+            "UPSTREAM_TIMEOUT",
+            "백엔드 응답이 지연되고 있습니다. 잠시 후 다시 시도하세요.",
+            retryable=True,
+            details=[{"field": "api_base_url", "reason": "TIMEOUT"}],
+        )
     except httpx.HTTPError:
         return _error_envelope(
             code="UPSTREAM_RESPONSE_INVALID",
@@ -318,7 +434,13 @@ def _capabilities_http(base_url: str, timeout_seconds: int = 15) -> dict[str, An
     return body
 
 
-def _error_envelope(code: str, message: str, *, retryable: bool, details: list[dict[str, str]]) -> dict[str, Any]:
+def _error_envelope(
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+    details: list[dict[str, str]],
+) -> dict[str, Any]:
     return {
         "status": "error",
         "data": None,
@@ -372,8 +494,15 @@ def get_capabilities(mode: Literal["demo", "http"] = "demo") -> dict[str, Any]:
     )
 
 
-@server.tool(description="자연어 이동 요청을 구조화하고 부족한 조건을 확인한다. MCP 데모 응답을 위해 examples.json interpret 케이스 2건과 정확히 일치하는 요청에는 해당 fixture 응답을 반환한다.")
-def interpret_trip(text: str, reference_time: str, timezone: str, context: dict | None = None) -> dict[str, Any]:
+@server.tool(
+    description="자연어 이동 요청을 구조화하고 부족한 조건을 확인한다. MCP 데모 응답을 위해 examples.json interpret 케이스 2건과 정확히 일치하는 요청에는 해당 fixture 응답을 반환한다."
+)
+def interpret_trip(
+    text: str,
+    reference_time: str,
+    timezone: str,
+    context: dict | None = None,
+) -> dict[str, Any]:
     """자연어 이동 요청을 구조화하고 부족한 조건을 확인한다.
 
     Args:
@@ -405,6 +534,56 @@ def interpret_trip(text: str, reference_time: str, timezone: str, context: dict 
         "context": context,
     }
     return _interpret_demo(request)
+
+
+@server.tool(
+    description=(
+        "장소 검색 후보를 반환한다. MCP 데모 응답은 examples.json places_found "
+        "케이스에 고정돼 있다.\n\n"
+        "Args:\n"
+        "    query: 장소 검색어(1~100자, 앞뒤 공백 제거 후).\n"
+        "    limit: 반환할 최대 후보 수(1~10 정수, 생략 시 5).\n\n"
+        "Returns:\n"
+        "    API_SPEC 공통 응답 envelope: {status, data, error, meta}.\n"
+        "    - examples.json places_found 케이스와 일치하는 요청에만 해당 fixture 응답을 반환.\n"
+        "    - 그 외 유효 입력: 빈 결과(places=[]) 데모 응답을 반환.\n"
+        "    - query/limit 투입 계약 위반 시: VALIDATION_ERROR envelope 반환.\n"
+        "    실제 장소 제공자·좌표 새로 만들기를 사용하지 않는다."
+    )
+)
+def search_places(query: Any, limit: Any | None = None) -> dict[str, Any]:
+    """장소 검색 후보를 반환한다.
+
+    Args:
+        query: 장소 검색어(1~100자, 앞뒤 공백 제거 후).
+        limit: 반환할 최대 후보 수(1~10 정수, 생략 시 5).
+
+    Returns:
+        API_SPEC 공통 응답 envelope: {status, data, error, meta}.
+        - examples.json places_found 케이스와 일치하는 요청에만 해당 fixture 응답을 반환.
+        - 그 외 유효 입력: 빈 결과(places=[]) 데모 응답을 반환.
+        - query/limit 투입 계약 위반 시: VALIDATION_ERROR envelope 반환.
+        실제 장소 제공자·좌표 새로 만들기를 사용하지 않는다.
+    """
+    try:
+        validated_query = _validate_search_places_query(query)
+    except RuntimeError as e:
+        return _error_envelope(
+            code="VALIDATION_ERROR",
+            message=str(e),
+            retryable=False,
+            details=[{"field": "query", "reason": "OUT_OF_RANGE"}],
+        )
+    try:
+        validated_limit = _validate_search_places_limit(limit)
+    except RuntimeError as e:
+        return _error_envelope(
+            code="VALIDATION_ERROR",
+            message=str(e),
+            retryable=False,
+            details=[{"field": "limit", "reason": "OUT_OF_RANGE"}],
+        )
+    return _search_places_demo(validated_query, validated_limit)
 
 
 async def main() -> None:
