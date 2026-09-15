@@ -58,9 +58,11 @@ def _request_id() -> str:
 
 
 # ---------------------------------------------------------------------------
-# search_places 데모 응답 — Docs/api/examples.json 의 places_found 케이스 계약
-# (백엔드·실제 장소 제공자 없이 서버에서 자급하는 결정적 시연 응답)
+# 공통 fixture 문자열 상수
 # ---------------------------------------------------------------------------
+
+# examples.json 원문: 첫 글자 U+D14C, 다음 U+30B9/U+30C8 — "테スト A역 승강장"
+PLATFORM_NAME_FIXTURE = "\ud14c\u30b9\u30c8 A역 승강장"
 
 SEARCH_PLACES_DEMO_RESPONSE: dict[str, Any] = {
     "status": "ok",
@@ -584,6 +586,573 @@ def search_places(query: Any, limit: Any | None = None) -> dict[str, Any]:
             details=[{"field": "limit", "reason": "OUT_OF_RANGE"}],
         )
     return _search_places_demo(validated_query, validated_limit)
+
+
+PLAN_APPOINTMENT_REQUEST: dict[str, Any] = {
+    "trip": {
+        "kind": "appointment",
+        "origin_place_id": "fixture:place-a",
+        "destination_place_id": "fixture:place-b",
+        "arrival_deadline": "2026-09-13T19:00:00+09:00",
+        "arrival_preference_minutes": 10,
+        "service_date": None,
+        "transport_modes": ["subway", "bus"],
+    },
+    "user_confirmed": True,
+}
+
+PLAN_APPOINTMENT_RESPONSE: dict[str, Any] = {
+    "status": "ok",
+    "data": {
+        "plan": {
+            "plan_id": "plan-fixture-1",
+            "generated_at": "2026-09-13T18:00:00+09:00",
+            "refresh_after": "2026-09-13T18:05:00+09:00",
+            "trip": {
+                "kind": "appointment",
+                "origin_place_id": "fixture:place-a",
+                "destination_place_id": "fixture:place-b",
+                "arrival_deadline": "2026-09-13T19:00:00+09:00",
+                "arrival_preference_minutes": 10,
+                "service_date": None,
+                "transport_modes": ["subway", "bus"],
+            },
+            "origin": {
+                "place_id": "fixture:place-a",
+                "name": "테스트 A역 1번 출구",
+                "address": "서울 내 가상 출발 지점",
+                "latitude": 37.5,
+                "longitude": 126.95,
+            },
+            "destination": {
+                "place_id": "fixture:place-b",
+                "name": "테스트 B역 2번 출구",
+                "address": "서울 내 가상 도착 지점",
+                "latitude": 37.51,
+                "longitude": 127.02,
+            },
+            "target_arrival_at": "2026-09-13T18:50:00+09:00",
+            "recommended_option_id": "option-a",
+            "options": [
+                {
+                    "option_id": "option-a",
+                    "summary": "가상 노선 A 이용 · 도보 10분",
+                    "recommended_leave_at": "2026-09-13T18:10:00+09:00",
+                    "hard_leave_at": None,
+                    "estimated_arrival_at": "2026-09-13T18:50:00+09:00",
+                    "total_duration_minutes": 40,
+                    "buffer": {
+                        "policy_version": "demo-v1",
+                        "total_minutes": 5,
+                        "items": [
+                            {
+                                "code": "BOARDING_MARGIN",
+                                "minutes": 5,
+                                "leg_id": "option-a-leg-2",
+                                "reason": "시연용 탑승 여유 5분",
+                            }
+                        ],
+                    },
+                    "arrival_status": "on_time",
+                    "late_by_minutes": 0,
+                    "target_margin_minutes": 0,
+                    "legs": [
+                        {
+                            "leg_id": "option-a-leg-1",
+                            "mode": "walk",
+                            "from": {
+                                "name": "테스트 A역 1번 출구",
+                                "latitude": 37.5,
+                                "longitude": 126.95,
+                            },
+                            "to": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "departure_at": "2026-09-13T18:10:00+09:00",
+                            "arrival_at": "2026-09-13T18:15:00+09:00",
+                            "duration_minutes": 5,
+                            "transit": None,
+                            "wait_reason": None,
+                        },
+                        {
+                            "leg_id": "option-a-leg-2",
+                            "mode": "wait",
+                            "from": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "to": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "departure_at": "2026-09-13T18:15:00+09:00",
+                            "arrival_at": "2026-09-13T18:20:00+09:00",
+                            "duration_minutes": 5,
+                            "transit": None,
+                            "wait_reason": "safety_buffer",
+                        },
+                        {
+                            "leg_id": "option-a-leg-3",
+                            "mode": "subway",
+                            "from": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "to": {
+                                "name": "테스트 B역 승강장",
+                                "latitude": 37.5101,
+                                "longitude": 127.0201,
+                            },
+                            "departure_at": "2026-09-13T18:20:00+09:00",
+                            "arrival_at": "2026-09-13T18:45:00+09:00",
+                            "duration_minutes": 25,
+                            "transit": {
+                                "line_name": "가상 노선 A",
+                                "direction": "테스트 B역 방향",
+                                "headsign": "테스트 B역",
+                                "service_id": "fixture-service-a",
+                            },
+                            "wait_reason": None,
+                        },
+                        {
+                            "leg_id": "option-a-leg-4",
+                            "mode": "walk",
+                            "from": {
+                                "name": "테스트 B역 승강장",
+                                "latitude": 37.5101,
+                                "longitude": 127.0201,
+                            },
+                            "to": {
+                                "name": "테스트 B역 2번 출구",
+                                "latitude": 37.51,
+                                "longitude": 127.02,
+                            },
+                            "departure_at": "2026-09-13T18:45:00+09:00",
+                            "arrival_at": "2026-09-13T18:50:00+09:00",
+                            "duration_minutes": 5,
+                            "transit": None,
+                            "wait_reason": None,
+                        },
+                    ],
+                    "calculation_method": "schedule_search",
+                    "sources": [
+                        {
+                            "provider": "fixture",
+                            "basis": "demo",
+                            "retrieved_at": "2026-09-13T18:00:00+09:00",
+                            "service_date": "2026-09-13",
+                        }
+                    ],
+                    "warnings": [
+                        {
+                            "code": "DEMO_DATA",
+                            "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다.",
+                        }
+                    ],
+                    "navigation_url": None,
+                }
+            ],
+        }
+    },
+    "error": None,
+    "meta": {
+        "request_id": "fixture-plan_appointment",
+        "server_time": "2026-09-13T18:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+PLAN_LAST_JOURNEY_REQUEST: dict[str, Any] = {
+    "trip": {
+        "kind": "last_journey",
+        "origin_place_id": "fixture:place-a",
+        "destination_place_id": "fixture:place-b",
+        "arrival_deadline": None,
+        "arrival_preference_minutes": 0,
+        "service_date": "2026-09-12",
+        "transport_modes": ["subway", "bus"],
+    },
+    "user_confirmed": True,
+}
+
+PLAN_LAST_JOURNEY_RESPONSE: dict[str, Any] = {
+    "status": "ok",
+    "data": {
+        "plan": {
+            "plan_id": "plan-fixture-last-1",
+            "generated_at": "2026-09-12T23:00:00+09:00",
+            "refresh_after": "2026-09-12T23:05:00+09:00",
+            "trip": {
+                "kind": "last_journey",
+                "origin_place_id": "fixture:place-a",
+                "destination_place_id": "fixture:place-b",
+                "arrival_deadline": None,
+                "arrival_preference_minutes": 0,
+                "service_date": "2026-09-12",
+                "transport_modes": ["subway", "bus"],
+            },
+            "origin": {
+                "place_id": "fixture:place-a",
+                "name": "테스트 A역 1번 출구",
+                "address": "서울 내 가상 출발 지점",
+                "latitude": 37.5,
+                "longitude": 126.95,
+            },
+            "destination": {
+                "place_id": "fixture:place-b",
+                "name": "테스트 B역 2번 출구",
+                "address": "서울 내 가상 도착 지점",
+                "latitude": 37.51,
+                "longitude": 127.02,
+            },
+            "target_arrival_at": None,
+            "recommended_option_id": "option-last-a",
+            "options": [
+                {
+                    "option_id": "option-last-a",
+                    "summary": "가상 노선 A 이용 · 도보 10분",
+                    "recommended_leave_at": "2026-09-12T23:35:00+09:00",
+                    "hard_leave_at": "2026-09-12T23:40:00+09:00",
+                    "estimated_arrival_at": "2026-09-13T00:15:00+09:00",
+                    "total_duration_minutes": 40,
+                    "buffer": {
+                        "policy_version": "demo-v1",
+                        "total_minutes": 5,
+                        "items": [
+                            {
+                                "code": "BOARDING_MARGIN",
+                                "minutes": 5,
+                                "leg_id": "option-last-a-leg-2",
+                                "reason": "시연용 탑승 여유 5분",
+                            }
+                        ],
+                    },
+                    "arrival_status": "not_applicable",
+                    "late_by_minutes": None,
+                    "target_margin_minutes": None,
+                    "legs": [
+                        {
+                            "leg_id": "option-last-a-leg-1",
+                            "mode": "walk",
+                            "from": {
+                                "name": "테스트 A역 1번 출구",
+                                "latitude": 37.5,
+                                "longitude": 126.95,
+                            },
+                            "to": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "departure_at": "2026-09-12T23:35:00+09:00",
+                            "arrival_at": "2026-09-12T23:40:00+09:00",
+                            "duration_minutes": 5,
+                            "transit": None,
+                            "wait_reason": None,
+                        },
+                        {
+                            "leg_id": "option-last-a-leg-2",
+                            "mode": "wait",
+                            "from": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "to": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "departure_at": "2026-09-12T23:40:00+09:00",
+                            "arrival_at": "2026-09-12T23:45:00+09:00",
+                            "duration_minutes": 5,
+                            "transit": None,
+                            "wait_reason": "safety_buffer",
+                        },
+                        {
+                            "leg_id": "option-last-a-leg-3",
+                            "mode": "subway",
+                            "from": {
+                                "name": PLATFORM_NAME_FIXTURE,
+                                "latitude": 37.5001,
+                                "longitude": 126.9501,
+                            },
+                            "to": {
+                                "name": "테스트 B역 승강장",
+                                "latitude": 37.5101,
+                                "longitude": 127.0201,
+                            },
+                            "departure_at": "2026-09-12T23:45:00+09:00",
+                            "arrival_at": "2026-09-13T00:10:00+09:00",
+                            "duration_minutes": 25,
+                            "transit": {
+                                "line_name": "가상 노선 A",
+                                "direction": "테스트 B역 방향",
+                                "headsign": "테스트 B역",
+                                "service_id": "fixture-service-a",
+                            },
+                            "wait_reason": None,
+                        },
+                        {
+                            "leg_id": "option-last-a-leg-4",
+                            "mode": "walk",
+                            "from": {
+                                "name": "테스트 B역 승강장",
+                                "latitude": 37.5101,
+                                "longitude": 127.0201,
+                            },
+                            "to": {
+                                "name": "테스트 B역 2번 출구",
+                                "latitude": 37.51,
+                                "longitude": 127.02,
+                            },
+                            "departure_at": "2026-09-13T00:10:00+09:00",
+                            "arrival_at": "2026-09-13T00:15:00+09:00",
+                            "duration_minutes": 5,
+                            "transit": None,
+                            "wait_reason": None,
+                        },
+                    ],
+                    "calculation_method": "schedule_search",
+                    "sources": [
+                        {
+                            "provider": "fixture",
+                            "basis": "demo",
+                            "retrieved_at": "2026-09-12T23:00:00+09:00",
+                            "service_date": "2026-09-12",
+                        }
+                    ],
+                    "warnings": [
+                        {
+                            "code": "DEMO_DATA",
+                            "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다.",
+                        }
+                    ],
+                    "navigation_url": None,
+                }
+            ],
+        }
+    },
+    "error": None,
+    "meta": {
+        "request_id": "fixture-plan_last_journey",
+        "server_time": "2026-09-12T23:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+CONFIRMATION_REQUIRED_REQUEST: dict[str, Any] = {
+    "trip": {
+        "kind": "appointment",
+        "origin_place_id": "fixture:place-a",
+        "destination_place_id": "fixture:place-b",
+        "arrival_deadline": "2026-09-13T19:00:00+09:00",
+        "arrival_preference_minutes": 10,
+        "service_date": None,
+        "transport_modes": ["subway", "bus"],
+    },
+    "user_confirmed": False,
+}
+
+CONFIRMATION_REQUIRED_RESPONSE: dict[str, Any] = {
+    "status": "error",
+    "data": None,
+    "error": {
+        "code": "USER_CONFIRMATION_REQUIRED",
+        "message": "이동 조건을 확인한 후 계산을 요청해 주세요.",
+        "retryable": False,
+        "details": [
+            {
+                "field": "user_confirmed",
+                "reason": "MUST_BE_TRUE",
+            }
+        ],
+    },
+    "meta": {
+        "request_id": "fixture-confirmation_required",
+        "server_time": "2026-09-13T18:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+INVALID_ARRIVAL_PREFERENCE_REQUEST: dict[str, Any] = {
+    "trip": {
+        "kind": "appointment",
+        "origin_place_id": "fixture:place-a",
+        "destination_place_id": "fixture:place-b",
+        "arrival_deadline": "2026-09-13T19:00:00+09:00",
+        "arrival_preference_minutes": -1,
+        "service_date": None,
+        "transport_modes": ["subway", "bus"],
+    },
+    "user_confirmed": True,
+}
+
+INVALID_ARRIVAL_PREFERENCE_RESPONSE: dict[str, Any] = {
+    "status": "error",
+    "data": None,
+    "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "도착 여유시간은 0~120분의 정수여야 합니다.",
+        "retryable": False,
+        "details": [
+            {
+                "field": "trip.arrival_preference_minutes",
+                "reason": "OUT_OF_RANGE",
+            }
+        ],
+    },
+    "meta": {
+        "request_id": "fixture-invalid_arrival_preference",
+        "server_time": "2026-09-13T18:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+LAST_JOURNEY_UNSUPPORTED_REQUEST: dict[str, Any] = {
+    "trip": {
+        "kind": "last_journey",
+        "origin_place_id": "fixture:place-a",
+        "destination_place_id": "fixture:place-b",
+        "arrival_deadline": None,
+        "arrival_preference_minutes": 0,
+        "service_date": "2026-09-12",
+        "transport_modes": ["subway", "bus"],
+    },
+    "user_confirmed": True,
+}
+
+LAST_JOURNEY_UNSUPPORTED_RESPONSE: dict[str, Any] = {
+    "status": "unavailable",
+    "data": None,
+    "error": {
+        "code": "LAST_JOURNEY_UNSUPPORTED",
+        "message": "선택한 경로의 막차 연결을 확인할 데이터가 없습니다.",
+        "retryable": False,
+        "details": [],
+    },
+    "meta": {
+        "request_id": "fixture-last_journey_unsupported",
+        "server_time": "2026-09-12T23:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+NO_FEASIBLE_JOURNEY_REQUEST: dict[str, Any] = {
+    "trip": {
+        "kind": "last_journey",
+        "origin_place_id": "fixture:place-a",
+        "destination_place_id": "fixture:place-b",
+        "arrival_deadline": None,
+        "arrival_preference_minutes": 0,
+        "service_date": "2026-09-12",
+        "transport_modes": ["subway", "bus"],
+    },
+    "user_confirmed": True,
+}
+
+NO_FEASIBLE_JOURNEY_RESPONSE: dict[str, Any] = {
+    "status": "unavailable",
+    "data": None,
+    "error": {
+        "code": "NO_FEASIBLE_JOURNEY",
+        "message": "확인된 지원 범위와 요청 조건에서 현재 이용 가능한 연결 경로가 없습니다.",
+        "retryable": False,
+        "details": [],
+    },
+    "meta": {
+        "request_id": "fixture-no_feasible_journey",
+        "server_time": "2026-09-12T23:00:00+09:00",
+        "api_version": "v1",
+        "is_demo": True,
+    },
+}
+
+
+def _plan_requests_match(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    return (
+        _json_stable(a.get("trip")) == _json_stable(b.get("trip"))
+        and a.get("user_confirmed") == b.get("user_confirmed")
+    )
+
+
+def _plan_journey_demo(request: dict[str, Any]) -> dict[str, Any]:
+    """examples.json에서 확정된 case와 정확히 일치하는 요청에만 해당 fixture를 반환한다.
+
+    - 실제 경로·시간·막차·Buffer 계산을 수행하지 않는다.
+    - 사용자 확인 없이 계획을 저장하거나 적용하지 않는다.
+    - 대화 상태·conversation_id·revision·Idempotency-Key를 저장하지 않는다.
+    """
+    # user_confirmed가 빠져 있으면 문서상 확인 요구 오류로 본다.
+    if not request.get("user_confirmed"):
+        return CONFIRMATION_REQUIRED_RESPONSE
+    if _plan_requests_match(request, PLAN_APPOINTMENT_REQUEST):
+        return PLAN_APPOINTMENT_RESPONSE
+    if _plan_requests_match(request, PLAN_LAST_JOURNEY_REQUEST):
+        return PLAN_LAST_JOURNEY_RESPONSE
+    if _plan_requests_match(request, CONFIRMATION_REQUIRED_REQUEST):
+        return CONFIRMATION_REQUIRED_RESPONSE
+    if _plan_requests_match(request, INVALID_ARRIVAL_PREFERENCE_REQUEST):
+        return INVALID_ARRIVAL_PREFERENCE_RESPONSE
+    if _plan_requests_match(request, LAST_JOURNEY_UNSUPPORTED_REQUEST):
+        return LAST_JOURNEY_UNSUPPORTED_RESPONSE
+    if _plan_requests_match(request, NO_FEASIBLE_JOURNEY_REQUEST):
+        return NO_FEASIBLE_JOURNEY_RESPONSE
+    # examples.json에 확정되지 않은 요청은 이번 데모에서 노출하지 않는다.
+    return _error_envelope(
+        code="INTERNAL_ERROR",
+        message="예시로 확정되지 않은 요청입니다.",
+        retryable=False,
+        details=[{"field": "trip", "reason": "NOT_FIXTURED"}],
+    )
+
+
+@server.tool(
+    description=(
+        "확인된 조건으로 약속 출발시각 또는 막차 계획을 계산한다. "
+        "MCP 데모 응답은 examples.json의 확정된 case와 정확히 일치하는 요청에만 "
+        "해당 fixture를 반환한다.\\n\\n"
+        "Args:\\n"
+        "    trip: 이동 조건(TripRequest). kind, origin_place_id, destination_place_id, "
+        "arrival_deadline, arrival_preference_minutes, service_date, transport_modes를 포함한다.\\n"
+        "    user_confirmed: true. 사용자 조건 확인 후 요청.\\n\\n"
+        "Returns:\\n"
+        "    API_SPEC 공통 응답 envelope: {status, data, error, meta}.\\n"
+        "    - examples.json case와 일치하는 요청에만 해당 fixture 응답을 반환.\\n"
+        "    - user_confirmed가 false이면 USER_CONFIRMATION_REQUIRED.\\n"
+        "    - 실제 경로·시간·막차·Buffer 계산은 수행하지 않는다.\\n"
+        "    실제 백엔드 /api/v1/journeys/plan HTTP 호출은 구현하지 않는다."
+    )
+)
+def plan_journey(trip: dict[str, Any], user_confirmed: bool) -> dict[str, Any]:
+    """확인된 조건으로 약속 출발시각 또는 막차 계획을 계산한다.
+
+    Args:
+        trip: 이동 조건(TripRequest).
+        user_confirmed: true. 사용자 조건 확인 후 요청. 생략 시 확인 요구 오류로 응답한다.
+
+    Returns:
+        API_SPEC 공통 응답 envelope: {status, data, error, meta}.
+        - examples.json case와 일치하는 요청에만 해당 fixture 응답을 반환.
+        - user_confirmed가 false이거나 누락이면 USER_CONFIRMATION_REQUIRED.
+        - 그 외는 미확정 요청으로 INTERNAL_ERROR envelope 반환.
+        실제 경로·시간·막차·Buffer 계산 및 백엔드 HTTP 호출은 수행하지 않는다.
+    """
+    request = {
+        "trip": trip,
+        "user_confirmed": user_confirmed,
+    }
+    return _plan_journey_demo(request)
 
 
 async def main() -> None:
