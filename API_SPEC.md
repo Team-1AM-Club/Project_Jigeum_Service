@@ -46,8 +46,52 @@ Hermes의 개발·시연 모델은 Solar Pro4다. 백엔드의 AI 호출 설정�
 | 성공/업무 결과 | HTTP 200 + status로 분기 |
 | 전송·검증·장애 | HTTP 4xx/5xx + status=error |
 | 인증 | 이 초안은 사용자 계정 API를 정의하지 않는다. 공개 배포의 접근 제어·호출 제한은 별도 확인한다. 설정 예제나 사용자 대화에 고정 비밀키를 노출하지 않는다. |
+| Idempotency-Key | 문자열. 상태 변경 요청에 MCP가 생성해 전달하는 UUID v4 표준 문자열(36자). 요청 헤더 `Idempotency-Key`로 전달하며, 응답 헤더에도 동일한 값을 반환한다. 응답 JSON envelope에는 중복 추가하지 않는다. 조회 전용 요청에는 불필요하며, 상태 변경 요청에서 누락되거나 형식이 잘못되면 422 VALIDATION_ERROR로 처리한다. 같은 key에 다른 요청이 이미 처리된 경우에는 409 IDEMPOTENCY_KEY_REUSED로 처리한다. |
 
 해석의 상대 날짜는 요청의 `reference_time`을 기준으로 계산한다. 실제 경로 계획·재탐색의 현재 시각은 **서버 시각**이다. 연동 계층이 시뮬레이션 시각을 보내 실제 운행 계산을 과거로 돌리는 기능은 제공하지 않는다.
+
+### Idempotency-Key 계약
+
+- 생성 주체: MCP 서버가 상태 변경 MCP 도구 호출 시작 시 UUID v4로 생성한다. 모델이나 사용자에게 입력받지 않는다.
+- 재사용 범위: 동일 MCP 호출 내부의 HTTP 재시도에서는 같은 키를 재사용한다. 새로운 논리적 사용자 동작에는 새 키를 생성한다.
+- 전달 방식: HTTP 요청 헤더 `Idempotency-Key`로 전달한다. 조회 전용 요청에는 불필요하며, 확인·선택·재탐색 결과 적용 등 상태 변경 요청에는 필수다.
+- 응답 반환: 백엔드는 응답 헤더에도 동일한 키를 반환한다. 응답 JSON envelope에는 같은 값을 중복 추가하지 않는다.
+- 형식 요구: UUID v4 표준 문자열 36자를 사용한다. 필수 요청에서 누락되거나 형식이 잘못되면 기존 VALIDATION_ERROR 계약에 따라 422로 처리한다.
+- 충돌 처리: 동일 key에 다른 요청이 이미 처리된 경우에는 HTTP 409, error.code `IDEMPOTENCY_KEY_REUSED`, message `Idempotency key was already used for a different request.`, retryable false로 처리한다. 클라이언트는 같은 키로 다른 요청을 재시도하지 않으며, 새 논리적 동작이면 새 키를 생성한다.
+
+### payload hash 계약
+
+- hash 범위: HTTP method, 정규화된 API path, conversation_id, expected revision, 상태 변경에 영향을 주는 전체 JSON body를 포함한다.
+- 제외: Idempotency-Key 자체, 서버 생성 request_id/server_time, tracing 헤더, 전송 시각 등 비즈니스 의미가 없는 값은 hash에서 제외한다.
+- canonicalization: JSON은 UTF-8, key 정렬, 불필요한 공백 제거 방식으로 canonicalize한 뒤 SHA-256을 사용한다.
+- body 책임: MCP는 최초 요청 body와 expected revision을 보관한다. 같은 논리적 요청 재시도 시 그대로 재전송하며, 재시도 과정에서 현재 시각이나 revision을 새 값으로 바꾸지 않는다.
+- 동일성 판단: 백엔드 canonicalization은 JSON 객체 키 순서와 공백 차이만 흡수한다. 배열 순서, null과 필드 생략, 값 변경은 동일하다고 간주하지 않는다. user_confirmed 등 일부 필드만 선택적으로 hash하지 않는다.
+
+### 동일 key 우선순위
+
+- 유효한 conversation에서 이미 성공한 동일 key·동일 payload 재요청은 stale revision 검사보다 먼저 처리한다. 상태를 다시 변경하지 않고 저장된 응답을 반환한다.
+- 단, conversation이 만료됐다면 과거 성공 응답을 복원하지 않고 410 CONVERSATION_EXPIRED로 처리한다.
+- 상태 변경과 idempotency 결과 기록은 같은 DB 트랜잭션으로 커밋한다.
+
+### 대화 상태 계약의 원칙
+
+- 최초 요청의 conversation_id는 선택 사항이며, 없으면 백엔드가 생성한다.
+- 백엔드는 관련 응답 meta에 conversation_id, revision, expires_at을 반환한다.
+- 이후 확인·선택·재탐색 요청은 conversation_id와 클라이언트가 마지막으로 받은 revision을 전달한다.
+- 상태 변경 성공 시 revision이 증가한다.
+- 오래된 revision은 409 CONVERSATION_VERSION_CONFLICT로 처리한다.
+- 없거나 만료된 대화는 410 CONVERSATION_EXPIRED로 처리한다.
+- API 비밀키나 사용자 계정 정보는 이 계약에 포함하지 않는다.
+
+### 재시도 책임
+
+- MCP는 네트워크 연결 실패, timeout, 또는 계약상 retryable=true인 HTTP 502/503/504에 한해 최초 호출 후 최대 1회 자동 재시도할 수 있다.
+- MCP 기본 재시도 정책은 자동 재시도 최대 1회, 대기 500ms로 한다. 새 인프라나 사용자 설정 기능을 추가하지 않는다.
+- MCP는 같은 Idempotency-Key와 같은 body로 재시도하며, 재시도 과정에서 현재 시각이나 revision을 새 값으로 바꾸지 않는다.
+- 해석 가능한 오류 응답이 retryable=false이면 HTTP 상태만 보고 재시도하지 않는다.
+- 409, 410, 검증 실패, invalid JSON/invalid response는 자동 재시도하지 않는다.
+- 백엔드는 workflow 수준의 자동 재시도를 하지 않으며, provider 호출을 DB 트랜잭션 내부에 포함하지 않는다.
+
 
 ## 3. API 목록
 
@@ -86,6 +130,9 @@ Hermes의 개발·시연 모델은 Solar Pro4다. 백엔드의 AI 호출 설정�
 
 `is_demo`는 클라이언트 요청 옵션이 아니다. 별도 개발/시연 환경에서만 true 결과를 반환한다. 실제 데이터 조회 실패 시 운영 서버가 임의로 Demo 결과로 전환해서는 안 된다.
 
+
+
+상태 변경 응답의 응답 헤더 `Idempotency-Key`는 요청 시 전달받은 값과 동일하며, 응답 JSON envelope에는 Idempotency-Key를 중복 추가하지 않는다.
 ### error
 
 | 필드 | 타입 | 의미 |
@@ -746,6 +793,14 @@ Comparison은 다음 필드다.
 | 502 | error | UPSTREAM_RESPONSE_INVALID | 제공처·모델 결과 검증 실패. 잘못된 경로·시간을 표시하지 않음 |
 | 504 | error | UPSTREAM_TIMEOUT | 외부 요청 시간 초과. 재시도 안내 |
 | 500 | error | INTERNAL_ERROR | 일반 오류 안내와 request_id 제공 |
+| 404 | error | CONVERSATION_NOT_FOUND | 존재한 적 없는 conversation_id로 요청함. 새 대화로 다시 시작한다. |
+| 409 | error | CONVERSATION_VERSION_CONFLICT | 전달한 revision이 서버의 현재 revision과 다르다. 최신 상태를 다시 받아 재시도해야 한다. |
+| 409 | error | IDEMPOTENCY_KEY_REUSED | 같은 Idempotency-Key로 다른 요청이 이미 처리됐다. 같은 키로 다른 요청을 재시도하지 않는다. |
+| 410 | error | CONVERSATION_EXPIRED | conversation이 만료됐다. 새 대화로 다시 시작한다. |
+| 410 | error | CANDIDATE_SET_EXPIRED | conversation은 유효하지만 후보 집합이 만료됐다. 기존 확인 조건으로 새 계획을 요청한다. |
+
+상태 관련 오류는 CONVERSATION_NOT_FOUND, CONVERSATION_EXPIRED, CANDIDATE_SET_EXPIRED, CONVERSATION_VERSION_CONFLICT, IDEMPOTENCY_KEY_REUSED로 구분한다.
+
 
 최소 서버에서 위 오류 코드가 발생하는 지점을 명시적으로 매핑한다. 존재하지 않는 경로·메서드도 JSON envelope를 유지하며 각각 404 NOT_FOUND, 405 METHOD_NOT_ALLOWED를 반환한다.
 
@@ -791,6 +846,43 @@ unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한
 
 문맥·확인·선택 상태의 실제 저장 위치와 수명은 구현 전에 공동 합의한다. 서버가 plan_id로 DB 복원을 수행한다고 가정하지 않는다. 과거의 Local Journey 영구 저장·상태 버튼·notification_id 모델은 현재 MCP 필수 계약이 아니다.
 
+
+
+### tombstone 생성 충돌 처리
+
+tombstone은 24시간 유지 후 hard delete한다. 정리는 백엔드 시작 시 한 번, 실행 중 주기적으로 수행하며, 요청 시 만료가 발견되면 cleanup 주기를 기다리지 않고 즉시 tombstone 처리한다. tombstone 전환으로 사용자 revision은 증가시키지 않고 마지막 revision을 유지한다.
+
+- 동일 conversation_id의 만료 처리는 멱등하게 수행한다.
+- 가능하면 기존 conversation 행을 조건부 UPDATE하여 tombstone으로 전환한다.
+- 별도 테이블을 사용하는 경우 UNIQUE 제약과 ON CONFLICT DO NOTHING을 사용한다.
+- 원본 payload 제거와 tombstone 기록은 같은 DB 트랜잭션으로 처리한다.
+- 충돌 후 해당 tombstone이 존재함을 확인하면 동일하게 410 CONVERSATION_EXPIRED로 응답한다.
+- 기존 expired_at을 재설정하거나 tombstone 보존 기간을 연장하지 않는다.
+- 중복 키 이외의 DB 오류는 무시하거나 410으로 감추지 않는다.
+- hard delete 이후에는 404 CONVERSATION_NOT_FOUND를 반환하고, 과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.
+
+존재한 적 없는 conversation과 hard delete된 conversation은 모두 404 CONVERSATION_NOT_FOUND로 처리한다.
+과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.
+
+이 문단은 provider 호출 순서의 5단계 절차를 정의한다.
+
+### provider 호출 순서와 상태 변경 경계
+
+provider가 필요한 상태 변경은 다음 순서를 따른다.
+
+1. conversation 유효성, 입력, idempotency 기록, revision을 확인한다.
+2. DB 쓰기 트랜잭션 밖에서 provider를 호출한다.
+3. provider 성공 결과를 검증한다.
+4. 짧은 DB 트랜잭션에서 만료 여부, idempotency 기록, revision을 다시 확인한다.
+5. domain 상태 변경 + revision 증가 + idempotency 성공 결과를 원자적으로 커밋한다.
+
+동시 요청이 먼저 같은 key로 완료했다면 저장된 응답을 반환한다.
+다른 요청 때문에 revision이 바뀌었다면 409 CONVERSATION_VERSION_CONFLICT를 반환하고 provider 결과는 적용하지 않는다.
+그 사이 conversation이 만료됐다면 410 CONVERSATION_EXPIRED로 처리한다.
+
+provider 호출이 필요 없는 상태 변경은 DB 트랜잭션 안에서 검증과 커밋을 수행한다.
+
+provider 실패는 domain 상태·revision·updated_at·TTL을 갱신하지 않는다. 백엔드는 workflow 수준의 자동 재시도를 하지 않으며, provider 호출을 DB 트랜잭션 내부에 포함하지 않는다.
 ## 12. 시간 초과·재시도·중복 요청
 
 - 서버 처리 제한 초안: health/capabilities 3초, places 10초, interpret/plan/replan 25초.
@@ -863,3 +955,20 @@ unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한
 - 호출 제한과 제공처별 최신성 기준.
 
 미확정 값을 실제 지원 기능처럼 하드코딩하지 않는다. capabilities에서 검증된 상태를 반환하고 불가능한 요청은 정의한 불가 사유로 응답한다.
+
+
+### tombstone 충돌 처리
+
+- tombstone은 24시간 유지 후 hard delete한다. 정리는 백엔드 시작 시 한 번, 실행 중 주기적으로 수행하며, 요청 시 만료가 발견되면 cleanup 주기를 기다리지 않고 즉시 tombstone 처리한다.
+- tombstone 전환으로 사용자 revision은 증가시키지 않고 마지막 revision을 유지한다.
+- 동일 conversation_id의 만료 처리는 멱등하게 수행한다.
+- 가능하면 기존 conversation 행을 조건부 UPDATE하여 tombstone으로 전환한다.
+- 별도 테이블을 사용하는 경우 UNIQUE 제약과 ON CONFLICT DO NOTHING을 사용한다.
+- 원본 payload 제거와 tombstone 기록은 같은 DB 트랜잭션으로 처리한다.
+- 충돌 후 해당 tombstone이 존재함을 확인하면 동일하게 410 CONVERSATION_EXPIRED로 응답한다.
+- 기존 expired_at을 재설정하거나 tombstone 보존 기간을 연장하지 않는다.
+- 중복 키 이외의 DB 오류는 무시하거나 410으로 감추지 않는다.
+- hard delete 이후에는 404 CONVERSATION_NOT_FOUND를 반환하고, 과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.
+
+존재한 적 없는 conversation과 hard delete된 conversation은 모두 404 CONVERSATION_NOT_FOUND로 처리한다.
+과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.
