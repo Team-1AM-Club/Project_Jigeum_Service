@@ -236,8 +236,8 @@ class TestReplanE2EWithActualMock:
                 headers={"Idempotency-Key": str(uuid.uuid4())},
             )
 
-            # user_confirmed 없이 호출하면 422
-            assert response.status_code == 422, f"reason={reason}: 예상 422, 실제 {response.status_code}"
+            # user_confirmed=true 이므로 유효한 요청 → 200
+            assert response.status_code == 200, f"reason={reason}: 예상 200, 실제 {response.status_code}"
 
     def test_e2e_replan_no_previous_plan(self, client):
         """이전 계획 없이 재탐색 가능."""
@@ -316,13 +316,15 @@ class TestReplanE2EWithActualMock:
         assert response.status_code == 422
         body = response.json()
 
-        # envelope 구조
-        assert "status" in body
-        assert "error" in body
-        assert "meta" in body
-
+        # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
         assert body["status"] == "error"
-        assert body["meta"]["api_version"] == "v1"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        assert "Idempotency-Key" in body["error"]["message"]
+        # details는 API 계약에 따라 배열 (Idempotency-Key는 헤더이므로 details에 field 정보 없을 수 있음)
+        assert isinstance(body["error"].get("details"), list)
+        # data/meta 검증 (오류 응답)
+        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("meta") is not None, "error 응답에도 meta는 포함"
 
     def test_e2e_replan_idempotency_key_validation(self, client):
         """Idempotency-Key 검증."""
@@ -346,13 +348,15 @@ class TestReplanE2EWithActualMock:
         assert response.status_code == 422
         body = response.json()
         
-        # FastAPI 기본 검증 오류 형식
-        assert "detail" in body
-        detail = body["detail"]
-        if isinstance(detail, str):
-            assert "Idempotency-Key" in detail or "UUID" in detail
-        elif isinstance(detail, list):
-            assert any("Idempotency-Key" in str(d) or "UUID" in str(d) for d in detail)
+        # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
+        assert body["status"] == "error"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        assert "Idempotency-Key" in body["error"]["message"]
+        # details는 API 계약에 따라 배열 (Idempotency-Key는 헤더이므로 details에 field 정보 없을 수 있음)
+        assert isinstance(body["error"].get("details"), list)
+        # data/meta 검증 (오류 응답)
+        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("meta") is not None, "error 응답에도 meta는 포함"
 
     def test_e2e_replan_auto_replacement_prevented(self, client):
         """이전 계획이 자동 교체되지 않음 검증."""

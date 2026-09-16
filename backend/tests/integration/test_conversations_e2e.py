@@ -24,6 +24,7 @@ from app.services.conversation_service import (
     get_conversation,
     update_conversation,
     check_and_handle_expiry,
+    hard_delete_conversation,
     hard_delete_if_eligible,
     mark_conditions_confirmed,
     mark_candidate_set_ready,
@@ -39,6 +40,7 @@ from app.services.calculation_service import (
     validate_plan_request_prerequisites,
     StateChangeValidationError,
 )
+from app.schemas.journeys import ReplanReason
 from app.schemas.errors import ErrorCode
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -145,11 +147,11 @@ class TestConversationE2E:
         )
 
         from app.services.idempotency_service import check_idempotency_hit
-        hit = check_idempotency_hit(db=db_session, conv.conversation_id, key, expected_hash)
+        hit = check_idempotency_hit(db=db_session, conversation_id=conv.conversation_id, idempotency_key=key, expected_payload_hash=expected_hash)
         assert hit == response_body
 
         # conversation revision 변화 없음 (상태 변경 안 됨)
-        retrieved = get_conversation(db=db_session, conv.conversation_id)
+        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
         assert retrieved.revision == 1
 
     def test_idempotency_reused_different_payload_returns_409(self, db_session):
@@ -179,7 +181,7 @@ class TestConversationE2E:
         )
 
         from app.services.idempotency_service import check_idempotency_conflict
-        is_conflict = check_idempotency_conflict(db=db_session, conv.conversation_id, key, expected_hash)
+        is_conflict = check_idempotency_conflict(db=db_session, conversation_id=conv.conversation_id, idempotency_key=key, expected_payload_hash=expected_hash)
         assert is_conflict is True
 
     def test_revision_conflict_returns_409(self, db_session):
@@ -210,7 +212,7 @@ class TestConversationE2E:
         conv = create_conversation(db=db_session, expires_in_minutes=0)
 
         # 만료 처리
-        check_and_handle_expiry(db=db_session, conv.conversation_id)
+        check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
 
         # T063 검증 호출 → 410
         with pytest.raises(StateChangeValidationError) as exc_info:
@@ -256,6 +258,7 @@ class TestConversationE2E:
             },
         )
 
+        # revision이 2로 증가했으므로 expected_revision=2 사용
         with pytest.raises(StateChangeValidationError) as exc_info:
             validate_state_change_request(
                 db=db_session,
@@ -263,7 +266,7 @@ class TestConversationE2E:
                 idempotency_key=str(uuid.uuid4()),
                 http_method="POST",
                 api_path="/api/v1/journeys/plan",
-                expected_revision=1,
+                expected_revision=2,
                 request_body={},
             )
         assert exc_info.value.error_code == "CANDIDATE_SET_EXPIRED"
@@ -285,11 +288,11 @@ class TestProviderFailureStateImmutability:
         # Idempotency 기록 없음 (실패했으므로)
         key = str(uuid.uuid4())
         from app.services.idempotency_service import get_idempotency_record
-        record = get_idempotency_record(db=db_session, conv.conversation_id, key)
+        record = get_idempotency_record(db=db_session, conversation_id=conv.conversation_id, idempotency_key=key)
         assert record is None
 
         # conversation 상태는 그대로
-        retrieved = get_conversation(db=db_session, conv.conversation_id)
+        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
         assert retrieved.revision == initial_revision
         assert retrieved.status == ConversationStatus.ACTIVE
 
@@ -301,7 +304,7 @@ class TestProviderFailureStateImmutability:
         # 제공사 실패 시뮬레이션 (아무것도 하지 않음)
 
         # updated_at 변화 없음
-        retrieved = get_conversation(db=db_session, conv.conversation_id)
+        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
         assert retrieved.updated_at == initial_updated_at
 
 
@@ -316,13 +319,14 @@ class TestTombstoneHardDeleteFlow:
         """만료 → tombstone 전환 시 payload 제거."""
         conv = create_conversation(
             db=db_session,
+            expires_in_minutes=0,  # 생성 즉시 만료
             confirmed_conditions={"user_confirmed": True},
             candidate_set={"options": [{"id": "opt1"}]},
             active_selected_plan={"plan_id": "plan1"},
         )
 
         # 만료 처리
-        result, was_expired = check_and_handle_expiry(db=db_session, conv.conversation_id)
+        result, was_expired = check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
         assert was_expired is True
         assert result.status == ConversationStatus.TOMBSTONE
 
@@ -340,13 +344,13 @@ class TestTombstoneHardDeleteFlow:
         conv = create_conversation(db=db_session, expires_in_minutes=0)
 
         # 만료 → tombstone
-        check_and_handle_expiry(db=db_session, conv.conversation_id)
+        check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
 
         # hard delete
-        hard_delete_conversation(db=db_session, conv.conversation_id)
+        hard_delete_conversation(db=db_session, conversation_id=conv.conversation_id)
 
         # 동일 ID 조회 → None (404)
-        retrieved = get_conversation(db=db_session, conv.conversation_id, include_expired=True)
+        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id, include_expired=True)
         assert retrieved is None
 
     def test_hard_delete_not_allowed_for_active(self, db_session):
@@ -354,17 +358,17 @@ class TestTombstoneHardDeleteFlow:
         conv = create_conversation(db=db_session)
 
         with pytest.raises(ValueError, match="tombstone"):
-            hard_delete_conversation(db=db_session, conv.conversation_id)
+            hard_delete_conversation(db=db_session, conversation_id=conv.conversation_id)
 
     def test_tombstone_idempotent_multiple_expiry_calls(self, db_session):
         """여러 번 만료 호출 → 멱등."""
         conv = create_conversation(db=db_session, expires_in_minutes=0)
 
-        check_and_handle_expiry(db=db_session, conv.conversation_id)
-        check_and_handle_expiry(db=db_session, conv.conversation_id)
-        check_and_handle_expiry(db=db_session, conv.conversation_id)
+        check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
+        check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
+        check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
 
-        result = get_conversation(db=db_session, conv.conversation_id, include_expired=True)
+        result = get_conversation(db=db_session, conversation_id=conv.conversation_id, include_expired=True)
         assert result.status == ConversationStatus.TOMBSTONE
         assert result.confirmed_conditions is None
 
@@ -441,6 +445,169 @@ class TestT040US1SpecificValidation:
 # ─────────────────────────────────────────────
 # T068: T063 일반 상태 변경 검증 통합 테스트
 # ─────────────────────────────────────────────
+
+
+    def test_confirm_then_plan_allowed(self, db_session):
+        """confirm 성공 → 동일 조건 plan 허용 (US1 핵심 시나리오).
+
+        Given: confirm 전 conversation (confirmed_conditions=None)
+        When:
+          1. mark_conditions_confirmed로 확인 완료 설정
+          2. validate_plan_request_prerequisites 호출
+        Then: 확인 조건 충족 → 검증 통과 (예외 없음)
+        """
+        conv = create_conversation(db=db_session)
+
+        # 1. 조건 확인 완료 (user_confirmed + conditions_confirmed + places_confirmed)
+        conv = mark_conditions_confirmed(
+            db=db_session,
+            conversation_id=conv.conversation_id,
+            expected_revision=1,
+            conditions={
+                "user_confirmed": True,
+                "conditions_confirmed": True,
+                "places_confirmed": True,
+            },
+        )
+        assert conv.revision == 2
+        assert conv.confirmed_conditions["user_confirmed"] is True
+
+        # 2. Plan 검증 → 통과 (예외 없음)
+        validate_plan_request_prerequisites(
+            conversation=conv,
+            origin_place_id="place1",
+            destination_place_id="place2",
+            user_confirmed=True,
+        )
+
+    def test_conditions_changed_after_confirm_invalidates_plan(self, db_session):
+        """조건 변경 → 기존 확인 무효화 → plan 거부.
+
+        Given: 확인된 conversation (user_confirmed=true, conditions_confirmed=true)
+        When:
+          1. update_conversation으로 confirmed_conditions 변경 (conditions_confirmed=false)
+          2. validate_plan_request_prerequisites 호출
+        Then: 조건 확인 미완료 → 422 USER_CONFIRMATION_REQUIRED
+        """
+        conv = create_conversation(
+            db=db_session,
+            confirmed_conditions={
+                "user_confirmed": True,
+                "conditions_confirmed": True,
+                "places_confirmed": True,
+            },
+        )
+        assert conv.revision == 1
+
+        # 조건 변경: conditions_confirmed를 false로
+        conv = update_conversation(
+            db=db_session,
+            conversation_id=conv.conversation_id,
+            expected_revision=1,
+            confirmed_conditions={
+                "user_confirmed": True,
+                "conditions_confirmed": False,  # 변경
+                "places_confirmed": True,
+            },
+        )
+        assert conv.revision == 2
+        assert conv.confirmed_conditions["conditions_confirmed"] is False
+
+        # Plan 검증 → 거부 (조건 확인 미완료)
+        with pytest.raises(StateChangeValidationError) as exc_info:
+            validate_plan_request_prerequisites(
+                conversation=conv,
+                origin_place_id="place1",
+                destination_place_id="place2",
+                user_confirmed=True,
+            )
+        assert exc_info.value.error_code == "USER_CONFIRMATION_REQUIRED"
+        assert exc_info.value.status_code == 422
+
+    def test_confirmed_conditions_persist_unchanged(self, db_session):
+        """조건 미변경 → 확인 상태 유지.
+
+        Given: 확인된 conversation
+        When: confirmed_conditions 재조회
+        Then: 확인 상태 그대로 유지 (변경 없음)
+        """
+        original_conditions = {
+            "user_confirmed": True,
+            "conditions_confirmed": True,
+            "places_confirmed": True,
+            "arrival_deadline": "2026-09-16T19:00:00+09:00",
+        }
+        conv = create_conversation(
+            db=db_session,
+            confirmed_conditions=original_conditions,
+        )
+
+        # 재확인: 동일 조건 유지
+        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
+        assert retrieved.confirmed_conditions == original_conditions
+        assert retrieved.confirmed_conditions["user_confirmed"] is True
+        assert retrieved.confirmed_conditions["conditions_confirmed"] is True
+
+        # Plan 검증 → 통과
+        validate_plan_request_prerequisites(
+            conversation=retrieved,
+            origin_place_id="place1",
+            destination_place_id="place2",
+            user_confirmed=True,
+        )
+
+    def test_conditions_confirmation_required_for_plan(self, db_session):
+        """user_confirmed=true이나 conditions_confirmed=false → plan 거부.
+
+        Given: user_confirmed만 있고 conditions_confirmed가 없는 conversation
+        When: validate_plan_request_prerequisites 호출
+        Then: 422 USER_CONFIRMATION_REQUIRED
+        """
+        conv = create_conversation(
+            db=db_session,
+            confirmed_conditions={
+                "user_confirmed": True,
+                "conditions_confirmed": False,  # 조건 확인 미완료
+                "places_confirmed": True,
+            },
+        )
+
+        with pytest.raises(StateChangeValidationError) as exc_info:
+            validate_plan_request_prerequisites(
+                conversation=conv,
+                origin_place_id="place1",
+                destination_place_id="place2",
+                user_confirmed=True,
+            )
+        assert exc_info.value.error_code == "USER_CONFIRMATION_REQUIRED"
+        assert exc_info.value.status_code == 422
+
+    def test_plan_requires_all_confirmation_fields(self, db_session):
+        """places_confirmed=false → plan 거부.
+
+        Given: user_confirmed=true, conditions_confirmed=true, places_confirmed=false
+        When: validate_plan_request_prerequisites 호출
+        Then: 422 USER_CONFIRMATION_REQUIRED
+        """
+        conv = create_conversation(
+            db=db_session,
+            confirmed_conditions={
+                "user_confirmed": True,
+                "conditions_confirmed": True,
+                "places_confirmed": False,  # 장소 확인 미완료
+            },
+        )
+
+        with pytest.raises(StateChangeValidationError) as exc_info:
+            validate_plan_request_prerequisites(
+                conversation=conv,
+                origin_place_id="place1",
+                destination_place_id="place2",
+                user_confirmed=True,
+            )
+        assert exc_info.value.error_code == "USER_CONFIRMATION_REQUIRED"
+        assert exc_info.value.status_code == 422
+
 
 class TestT063StateValidation:
     """T063: 일반 상태 변경 검증 통합 테스트."""

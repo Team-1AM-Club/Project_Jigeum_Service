@@ -6,7 +6,19 @@ confirmed_conditions, candidate_set, active_selected_plan, updated_at, created_a
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Enum as SQLEnum
 from sqlalchemy.orm import declarative_base
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import enum
+
+SEOUL_TZ = ZoneInfo("Asia/Seoul")
+
+
+def _ensure_aware_utc(dt):
+    """DB 조회 시 timezone 정보가 소실된 datetime을 UTC aware로 복원."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 Base = declarative_base()
 
@@ -36,8 +48,16 @@ class Conversation(Base):
     conversation_id = Column(String(36), primary_key=True, nullable=False)
     revision = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    _expires_at = Column("expires_at", DateTime(timezone=True), nullable=True)
     confirmed_conditions = Column(JSON, nullable=True)
+
+    @property
+    def expires_at(self):
+        return _ensure_aware_utc(self._expires_at)
+
+    @expires_at.setter
+    def expires_at(self, value):
+        self._expires_at = value
     candidate_set = Column(JSON, nullable=True)
     active_selected_plan = Column(JSON, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),

@@ -29,18 +29,17 @@ interpret_service = InterpretService(model_provider=mock_model_provider)
 
 
 def validate_idempotency_key(key: str | None) -> str:
-    """Idempotency-Key 헤더 검증 (UUID v4, 36자)."""
+    """Idempotency-Key 헤더 검증 (UUID v4, 36자).
+    검증 실패 시 ValueError를 raise → 호출부에서 error_response로 처리.
+    """
     if not key:
-        raise HTTPException(status_code=422, detail="Idempotency-Key 헤더가 필수입니다.")
+        raise ValueError("Idempotency-Key 헤더가 필수입니다.")
     try:
         uid = uuid.UUID(key)
         if uid.version != 4:
             raise ValueError("UUID 버전 4만 허용")
     except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=422,
-            detail="Idempotency-Key는 유효한 UUID v4 (36자)여야 합니다.",
-        )
+        raise ValueError("Idempotency-Key는 유효한 UUID v4 (36자)여야 합니다.")
     return key
 
 
@@ -76,7 +75,7 @@ async def mobility_interpret(
 
         # 응답을 dict로 직렬화
         response_dict = {
-            "trip_draft": response_data.trip_draft.model_dump(exclude_none=True),
+            "trip_draft": response_data.trip_draft.model_dump(mode="json"),
             "confirmation_questions": [
                 q.model_dump(exclude_none=True) for q in response_data.confirmation_questions
             ],

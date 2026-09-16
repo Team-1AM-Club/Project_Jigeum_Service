@@ -106,10 +106,13 @@ class TestLastJourneyContract:
         assert response.status_code == 422
         body = response.json()
         
-        # FastAPI 기본 검증 오류 형식 (Pydantic validation error)
-        assert "detail" in body
-        assert any("origin_place_id" in str(d) for d in body["detail"]), \
-            f"detail에 origin_place_id 관련 오류 포함 기대: {body['detail']}"
+        # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
+        assert body["status"] == "error"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        # details에서 field 정보 확인
+        details = body["error"].get("details", [])
+        assert any("origin_place_id" in d.get("field", "") for d in details), \
+            f"details에 origin_place_id 관련 오류 포함 기대: {details}"
 
     def test_last_journey_response_common_envelope(self, client):
         """막차 계획 응답 envelope 구조 검증.
@@ -168,12 +171,13 @@ class TestLastJourneyContract:
         assert response.status_code == 422
         body = response.json()
         
-        # 응답 형식 검증: envelope 또는 FastAPI 기본값 모두 허용
-        if body.get("status") == "error":
-            assert "출발지" in body["error"]["message"]
-        elif "detail" in body:
-            # FastAPI 기본 검증 오류 형식
-            assert any("origin_place_id" in str(d) for d in body["detail"])
+        # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
+        assert body["status"] == "error"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        # details에서 field 정보 확인
+        details = body["error"].get("details", [])
+        assert any("origin_place_id" in d.get("field", "") for d in details), \
+            f"details에 origin_place_id 관련 오류 포함 기대: {details}" 
 
     def test_last_journey_idempotency_key_required(self, client):
         """Idempotency-Key 누락 → 422.

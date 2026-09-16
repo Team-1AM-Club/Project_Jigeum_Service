@@ -9,6 +9,7 @@ Provider 호출 순서 5단계 준수:
 """
 import logging
 from typing import Optional, Any
+from app.schemas.journeys import ReplanReason
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 

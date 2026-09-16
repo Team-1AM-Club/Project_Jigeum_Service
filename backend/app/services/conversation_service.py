@@ -17,6 +17,19 @@ from app.schemas.errors import ErrorCode
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
 
+def _ensure_aware_utc(dt):
+    """DB 조회 시 timezone 정보가 소실된 datetime을 UTC aware로 복원.
+
+    SQLite는 timezone 정보를 저장하지 않아 naive datetime으로 조회된다.
+    비교·연산 전 UTC로 보정한다.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # ─────────────────────────────────────────────
 # 대화 생성
 # ─────────────────────────────────────────────
@@ -25,6 +38,8 @@ def create_conversation(
     conversation_id: Optional[str] = None,
     expires_in_minutes: int = 1440,  # 기본 24시간
     confirmed_conditions: Optional[dict] = None,
+    candidate_set: Optional[dict] = None,
+    active_selected_plan: Optional[dict] = None,
 ) -> Conversation:
     """새 대화 생성.
 
@@ -33,6 +48,8 @@ def create_conversation(
         conversation_id: 직접 지정 UUID (미지정 시 자동 생성)
         expires_in_minutes: 생성 시점부터 만료까지 분
         confirmed_conditions: 초기 확인 조건 (옵션)
+        candidate_set: 초기 후보 집합 (옵션)
+        active_selected_plan: 초기 선택 계획 (옵션)
 
     Returns:
         생성된 Conversation 객체
@@ -48,6 +65,8 @@ def create_conversation(
         revision=1,
         expires_at=expires_at,
         confirmed_conditions=confirmed_conditions,
+        candidate_set=candidate_set,
+        active_selected_plan=active_selected_plan,
         status=ConversationStatus.ACTIVE,
         updated_at=now,
     )
@@ -112,7 +131,7 @@ def update_conversation(
     Raises:
         ValueError: 대화 없음 또는 revision 불일치
     """
-    conv = get_conversation(db, conversation_id)
+    conv = get_conversation(db, conversation_id, include_expired=True)
     if conv is None:
         raise ValueError(f"Conversation not found: {conversation_id}")
 
@@ -147,7 +166,7 @@ def expire_conversation(
 
     active → tombstone 으로 변경. 데이터 보존.
     """
-    conv = get_conversation(db, conversation_id)
+    conv = get_conversation(db, conversation_id, include_expired=True)
     if conv is None:
         raise ValueError(f"Conversation not found: {conversation_id}")
 
@@ -300,7 +319,8 @@ def check_and_handle_expiry(
         # 이미 tombstone → 멱등 반환
         return conv, True
 
-    if conv.expires_at is not None and conv.expires_at <= now:
+    expires_at = _ensure_aware_utc(conv.expires_at)
+    if expires_at is not None and expires_at <= now:
         # 만료 → tombstone 전환
         # payload 제거 (보안상 완전히 삭제)
         conv.confirmed_conditions = None
@@ -354,6 +374,7 @@ def candidate_set_expired(
         cs_expires_dt = cs_expires
 
     now = datetime.now(timezone.utc)
+    cs_expires_dt = _ensure_aware_utc(cs_expires_dt)
     return cs_expires_dt <= now
 
 
@@ -384,6 +405,7 @@ def hard_delete_if_eligible(
     if tombstone_since is None:
         return False
 
+    tombstone_since = _ensure_aware_utc(tombstone_since)
     eligible = datetime.now(timezone.utc) - tombstone_since >= __import__("datetime").timedelta(hours=tombstone_age_hours)
     if not eligible:
         return False

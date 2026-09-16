@@ -263,12 +263,13 @@ class TestReplanContract:
         assert response.status_code == 422
         body = response.json()
         
-        # 응답 형식 검증: envelope 또는 FastAPI 기본값 모두 허용
-        if body.get("status") == "error":
-            assert "trip" in body["error"]["message"] or "origin" in body["error"]["message"]
-        elif "detail" in body:
-            # FastAPI 기본 검증 오류 형식
-            assert any("trip" in str(d).lower() or "origin" in str(d).lower() for d in body["detail"])
+        # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
+        assert body["status"] == "error"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        # details에서 field 정보 확인
+        details = body["error"].get("details", [])
+        assert any("trip" in d.get("field", "").lower() or "origin" in d.get("field", "").lower()
+                  for d in details), f"details에 trip/origin 관련 오류 포함 기대: {details}"
 
     def test_replan_missing_origin_in_trip_returns_422(self, client):
         """trip.origin_place_id 누락 → 422.
@@ -348,11 +349,15 @@ class TestReplanContract:
         assert response.status_code == 422
         body = response.json()
         
-        # FastAPI 기본 검증 오류 형식 (Header 검증 오류)
-        assert "detail" in body
-        detail = body["detail"]
-        if isinstance(detail, str):
-            assert "Idempotency-Key" in detail, f"detail에 Idempotency-Key 포함 기대: {detail}"
-        elif isinstance(detail, list):
-            assert any("Idempotency-Key" in str(d) for d in detail), \
-                f"detail에 Idempotency-Key 관련 오류 포함 기대: {detail}"
+        # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
+        assert body["status"] == "error"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        assert "Idempotency-Key" in body["error"]["message"]
+        # details는 API 계약에 따라 배열 (Idempotency-Key는 헤더이므로 details에 field 정보 없을 수 있음)
+        assert isinstance(body["error"].get("details"), list)
+        # data/meta 검증 (오류 응답)
+        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("meta") is not None, "error 응답에도 meta는 포함"
+        # data/meta 검증 (오류 응답)
+        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("meta") is not None, "error 응답에도 meta는 포함"

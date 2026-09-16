@@ -74,7 +74,7 @@ class ReplanService:
             raise ValueError("conversation_id가 필요합니다.")
 
         if not request.trip or not request.trip.get("origin_place_id"):
-            raise ValueError("재탐색할 trip 정보(origin_place_id)가 필요합니다.")
+            raise ValueError("origin_place_id가 필요합니다")
 
         if not request.user_confirmed:
             raise ValueError("사용자 확인이 필요합니다. user_confirmed=true로 재요청하세요.")

@@ -33,18 +33,17 @@ plan_service = PlanService(routing_provider=mock_routing_provider)
 
 
 def validate_idempotency_key(key: str | None) -> str:
-    """Idempotency-Key 헤더 검증 (UUID v4)."""
+    """Idempotency-Key 헤더 검증 (UUID v4).
+    검증 실패 시 ValueError를 raise → 호출부에서 error_response로 처리.
+    """
     if not key:
-        raise HTTPException(status_code=422, detail="Idempotency-Key 헤더가 필수입니다.")
+        raise ValueError("Idempotency-Key 헤더가 필수입니다.")
     try:
         uid = UUID(key)
         if uid.version != 4:
             raise ValueError("UUID 버전 4만 허용")
     except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=422,
-            detail="Idempotency-Key는 유효한 UUID v4 (36자)여야 합니다.",
-        )
+        raise ValueError("Idempotency-Key는 유효한 UUID v4 (36자)여야 합니다.")
     return key
 
 
@@ -90,9 +89,7 @@ async def journeys_plan(
         "meta": { ... }
     }
     """
-    # Idempotency-Key 검증
-    ikey = validate_idempotency_key(idempotency_key)
-
+    # Idempotency-Key 검증 (try 블록 내에서 호출하여 ValueError 캐치)
     # 출발지 확정 검증
     if not request_body.origin_place_id or not request_body.origin_place_id.strip():
         return error_response(
@@ -110,7 +107,10 @@ async def journeys_plan(
         )
 
     try:
-        # Plan 서비스 호출
+                # Idempotency-Key 검증
+        ikey = validate_idempotency_key(idempotency_key)
+
+# Plan 서비스 호출
         plan_result = await plan_service.plan(
             request=request_body,
             buffer_minutes=5,
@@ -122,7 +122,7 @@ async def journeys_plan(
             is_demo=True,
         )
 
-        response_dict = plan_result.model_dump(exclude_none=True, mode="json")
+        response_dict = plan_result.model_dump(mode="json")
 
         return success_response(data=response_dict, meta=meta)
 
@@ -194,9 +194,7 @@ async def journeys_plan_last_journey(
         "meta": { ... }
     }
     """
-    # Idempotency-Key 검증
-    ikey = validate_idempotency_key(idempotency_key)
-
+    # Idempotency-Key 검증 (try 블록 내에서 호출하여 ValueError 캐치)
     # 출발지 확정 검증
     if not request_body.origin_place_id or not request_body.origin_place_id.strip():
         return error_response(
@@ -213,13 +211,16 @@ async def journeys_plan_last_journey(
             status_code=422,
         )
 
+    from app.services.last_journey_service import (
+        LastJourneyUnsupportedError,
+        NoFeasibleJourneyError,
+        LastJourneyService,
+    )
+    from app.services.mock.mock_providers import MockRoutingProvider
+
     try:
-        from app.services.last_journey_service import (
-            LastJourneyUnsupportedError,
-            NoFeasibleJourneyError,
-            LastJourneyService,
-        )
-        from app.services.mock.mock_providers import MockRoutingProvider
+        # Idempotency-Key 검증
+        ikey = validate_idempotency_key(idempotency_key)
 
         mock_provider = MockRoutingProvider()
         last_journey_service = LastJourneyService(routing_provider=mock_provider)
@@ -324,9 +325,7 @@ async def journeys_replan(
         "meta": { ... }
     }
     """
-    # Idempotency-Key 검증
-    ikey = validate_idempotency_key(idempotency_key)
-
+    # Idempotency-Key 검증 (try 블록 내에서 호출하여 ValueError 캐치)
     # 대화 ID 필수 확인
     if not request_body.conversation_id:
         return error_response(
@@ -363,6 +362,9 @@ async def journeys_replan(
         from app.services.plan_service import PlanService
         from app.services.mock.mock_providers import MockRoutingProvider
 
+        # Idempotency-Key 검증
+        ikey = validate_idempotency_key(idempotency_key)
+
         # 서비스 초기화
         mock_provider = MockRoutingProvider()
         plan_service = PlanService(routing_provider=mock_provider)
@@ -380,7 +382,7 @@ async def journeys_replan(
             is_demo=True,
         )
 
-        response_dict = replan_response.model_dump(exclude_none=True, mode="json")
+        response_dict = replan_response.model_dump(mode="json")
 
         return success_response(data=response_dict, meta=meta)
 

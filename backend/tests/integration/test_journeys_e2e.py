@@ -9,11 +9,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from datetime import datetime, timedelta, timezone
+from freezegun import freeze_time
 from zoneinfo import ZoneInfo
 import uuid
 
 from app.schemas.mobility import InterpretResponse
-from app.schemas.journeys import Plan
+from app.schemas.journeys import Plan, TripRequest
 from app.schemas.errors import ErrorCode
 from app.schemas.common import Envelope
 from app.services.provider_interfaces import RoutingProvider, ProviderResult
@@ -165,6 +166,7 @@ class TestJourneysE2EWithActualMock:
         assert plan_data["total_duration_minutes"] == 42
         assert plan_data["buffer_applied"] == 5
 
+    @freeze_time("2026-09-16 10:00:00+09:00")
     def test_mock_flow_interpret_then_plan_full_chain(self, client):
         """전체 Mock 체인: interpret → plan (확인 가정).
 
@@ -292,5 +294,6 @@ class TestJourneysE2EWithActualMock:
 
         # Mock 옵션 데이터 구조 검증
         opt = plan.comparison.options[0]
-        assert "reasoning" in opt
-        assert opt["reasoning"]  # 근거 설명 존재
+        opt_dict = opt.model_dump() if hasattr(opt, "model_dump") else dict(opt)
+        assert "reasoning" in opt_dict
+        assert opt_dict["reasoning"]  # 근거 설명 존재

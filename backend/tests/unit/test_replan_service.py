@@ -18,12 +18,13 @@ from app.schemas.journeys import (
     ReplanResponse,
     ReplanReason,
 )
+
+
 from app.services.replan_service import ReplanService
 from app.services.plan_service import PlanService
 from app.services.provider_interfaces import RoutingProvider, ProviderResult
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
-
 
 @pytest.fixture
 def mock_plan_service():
@@ -34,17 +35,14 @@ def mock_plan_service():
     service.routing_provider.search_options = AsyncMock()
     return service
 
-
 @pytest.fixture
 def replan_service(mock_plan_service):
     return ReplanService(plan_service=mock_plan_service)
 
-
 @pytest.fixture(scope="function")
 def valid_replan_request():
     """Valid replan request fixture (module level for all test classes)."""
-    from app.schemas.journeys import ReplanRequest, ReplanReason
-    
+        
     return ReplanRequest(
         conversation_id="test_replan_001",
         trip={
@@ -63,8 +61,6 @@ def valid_replan_request():
         max_options=3,
     )
 
-
-
 class TestReplanServiceNormalCase:
     """재탐색 서비스 정상 케이스 테스트."""
 
@@ -80,7 +76,6 @@ class TestReplanServiceNormalCase:
     @pytest.fixture
     def replan_service(self, mock_plan_service):
         return ReplanService(plan_service=mock_plan_service)
-
 
 class TestArrivalChangeCalculation:
     """arrival_change_minutes 계산 검증 테스트."""
@@ -189,7 +184,6 @@ class TestArrivalChangeCalculation:
 
         assert response.comparison.arrival_change_minutes is None
 
-
 class TestLeaveChangeCalculation:
     """leave_change_minutes 계산 검증 테스트."""
 
@@ -216,7 +210,6 @@ class TestLeaveChangeCalculation:
         assert response.comparison.leave_change_minutes == 20, (
             f"기대 20, 실제 {response.comparison.leave_change_minutes}"
         )
-
 
 class TestPreviousPlanPreservation:
     """이전 선택 보존 검증 테스트."""
@@ -278,7 +271,6 @@ class TestPreviousPlanPreservation:
         # 예외 발생 시에도 이전 계획은 삭제되지 않음 (메모리 상으로만 존재)
         # 이는 서비스 레벨에서 보장됨
 
-
 class TestUserConfirmationRequirement:
     """사용자 확인 요구 검증 테스트."""
 
@@ -321,7 +313,6 @@ class TestUserConfirmationRequirement:
 
         assert isinstance(response, ReplanResponse)
         assert response.replan_id is not None
-
 
 class TestReplanRequestValidation:
     """재탐색 요청 검증 테스트."""
@@ -379,7 +370,6 @@ class TestReplanRequestValidation:
             await replan_service.replan(request=request)
 
         assert "destination" in str(exc_info.value).lower() or "목적지" in str(exc_info.value)
-
 
 class TestAutoReplacementPrevention:
     """자동 교체 방지 검증 테스트."""

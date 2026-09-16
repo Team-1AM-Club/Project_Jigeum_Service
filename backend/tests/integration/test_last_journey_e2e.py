@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import uuid
 
-from app.schemas.journeys import Plan
+from app.schemas.journeys import Plan, TripRequest
 from app.schemas.errors import ErrorCode
 from app.schemas.common import Envelope
 from app.services.provider_interfaces import RoutingProvider, ProviderResult
@@ -90,9 +90,13 @@ class TestLastJourneyE2EWithActualMock:
         assert response.status_code == 422
         body = response.json()
         
-        # FastAPI 기본 검증 오류 형식
-        assert "detail" in body
-        assert any("origin_place_id" in str(d) for d in body["detail"])
+        # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
+        assert body["status"] == "error"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        # details에서 field 정보 확인
+        details = body["error"].get("details", [])
+        assert any("origin_place_id" in d.get("field", "") for d in details), \
+            f"details에 origin_place_id 관련 오류 포함 기대: {details}"
 
     def test_e2e_last_journey_idempotency_key_validation(self, client):
         """Idempotency-Key 검증: 누락 시 422."""
@@ -109,13 +113,19 @@ class TestLastJourneyE2EWithActualMock:
         assert response.status_code == 422
         body = response.json()
         
-        # FastAPI 기본 검증 오류 형식
-        assert "detail" in body
-        detail = body["detail"]
-        if isinstance(detail, str):
-            assert "Idempotency-Key" in detail
-        elif isinstance(detail, list):
-            assert any("Idempotency-Key" in str(d) for d in detail)
+        # envelope 오류 형식 (APISPEC.md §4 공통 응답)
+        assert body["status"] == "error"
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        # Idempotency-Key는 요청 헤더이므로 details에 field 정보가 없을 수 있음
+        # API_SPEC.md §4: details는 배열, 없으면 []
+        details = body["error"].get("details", [])
+        assert isinstance(details, list), f"details는 리스트여야 함: {type(details)}"
+        # data/meta 미포함 검증 (오류 응답)
+        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("meta") is not None, "error 응답에도 meta는 포함"
+        # 계산/상태 변경 미발생: 응답 헤더에 Idempotency-Key 없음 (SC-013)
+        # (TestClient에서는 headers로 접근)
+        assert "Idempotency-Key" not in response.headers or response.headers.get("Idempotency-Key") is None
 
     def test_e2e_last_journey_plan_structure_when_supported(self, client):
         """Mock 제공자 패치 시 막차 Plan 구조 검증.

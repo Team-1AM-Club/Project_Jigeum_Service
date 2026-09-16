@@ -52,6 +52,12 @@ def db_session():
     engine = create_engine("sqlite:///:memory:", echo=False)
     # UNIQUE 제약 등 SQLite에서 지원 안 하는 기능은 제외
     Conversation.__table__.create(engine)
+    # Plan 테이블은 필요시 생성 (CASCADE 삭제 테스트용)
+    try:
+        from app.models.plan import Plan as PlanModel
+        PlanModel.__table__.create(engine)
+    except Exception:
+        pass
     IdempotencyRecord.__table__.create(engine)
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
@@ -403,7 +409,7 @@ class TestIdempotencyKey:
         assert record.payload_hash
         assert len(record.payload_hash) == 64
 
-        retrieved = get_idempotency_record(db=db_session, conv.conversation_id, record.idempotency_key)
+        retrieved = get_idempotency_record(db=db_session, conversation_id=conv.conversation_id, idempotency_key=record.idempotency_key)
         assert retrieved
         assert retrieved.payload_hash == record.payload_hash
 
@@ -529,7 +535,7 @@ class TestCandidateSetExpiry:
                 "expires_at": "2020-01-01T00:00:00+09:00",  # 과거
             },
         )
-        assert candidate_set_expired(db=db_session, conv.conversation_id) is True
+        assert candidate_set_expired(db=db_session, conversation_id=conv.conversation_id) is True
 
     def test_candidate_set_expired_false(self, db_session):
         """candidate_set expires_at 미래 → False."""
@@ -543,9 +549,9 @@ class TestCandidateSetExpiry:
                 "expires_at": "2099-01-01T00:00:00+09:00",  # 미래
             },
         )
-        assert candidate_set_expired(db=db_session, conv.conversation_id) is False
+        assert candidate_set_expired(db=db_session, conversation_id=conv.conversation_id) is False
 
     def test_candidate_set_expired_no_candidate_set(self, db_session):
         """candidate_set 없음 → False."""
         conv = create_conversation(db=db_session)
-        assert candidate_set_expired(db=db_session, conv.conversation_id) is False
+        assert candidate_set_expired(db=db_session, conversation_id=conv.conversation_id) is False

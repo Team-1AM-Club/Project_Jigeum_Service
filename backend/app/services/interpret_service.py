@@ -268,8 +268,10 @@ class InterpretService:
         """
         questions = []
 
-        # 출발지 미확정 → 확인 질문
-        if not parsed.get("origin_place_id") or not parsed.get("origin_place_name"):
+        # 출발지 확인 질문
+        origin_id = parsed.get("origin_place_id")
+        origin_name = parsed.get("origin_place_name")
+        if not origin_id and not origin_name:
             questions.append(ConfirmationQuestion(
                 question_type="place_confirmation",
                 place_id=None,
@@ -280,18 +282,29 @@ class InterpretService:
                     {"place_id": None, "place_name": "다른 장소", "description": "직접 입력"},
                 ],
             ))
-        elif parsed.get("origin_place_id") is None:
+        elif origin_id is None and origin_name:
             # 이름은 있지만 ID 미확정
             questions.append(ConfirmationQuestion(
                 question_type="place_confirmation",
                 place_id=None,
-                place_name=parsed["origin_place_name"],
-                question=f"출발지를 '{parsed['origin_place_name']}'로 확인하셨나요?",
+                place_name=origin_name,
+                question=f"출발지를 '{origin_name}'로 확인하셨나요?",
+                alternatives=[],
+            ))
+        elif origin_id:
+            # ID는 있지만 확인 질문 포함 (place_id 포함)
+            questions.append(ConfirmationQuestion(
+                question_type="place_confirmation",
+                place_id=origin_id,
+                place_name=origin_name or origin_id.replace("place_", "").replace("_", " "),
+                question=f"출발지를 '{origin_name or origin_id}'로 확인하셨나요?",
                 alternatives=[],
             ))
 
-        # 목적지 미확정 → 확인 질문
-        if not parsed.get("destination_place_id") or not parsed.get("destination_place_name"):
+        # 목적지 확인 질문
+        dest_id = parsed.get("destination_place_id")
+        dest_name = parsed.get("destination_place_name")
+        if not dest_id and not dest_name:
             questions.append(ConfirmationQuestion(
                 question_type="place_confirmation",
                 place_id=None,
@@ -299,12 +312,20 @@ class InterpretService:
                 question="목적지를 확인해주세요. 어디로 가시나요?",
                 alternatives=[],
             ))
-        elif parsed.get("destination_place_id") is None:
+        elif dest_id is None and dest_name:
             questions.append(ConfirmationQuestion(
                 question_type="place_confirmation",
                 place_id=None,
-                place_name=parsed["destination_place_name"],
-                question=f"목적지를 '{parsed['destination_place_name']}'로 확인하셨나요?",
+                place_name=dest_name,
+                question=f"목적지를 '{dest_name}'로 확인하셨나요?",
+                alternatives=[],
+            ))
+        elif dest_id:
+            questions.append(ConfirmationQuestion(
+                question_type="place_confirmation",
+                place_id=dest_id,
+                place_name=dest_name or dest_id.replace("place_", "").replace("_", " "),
+                question=f"목적지를 '{dest_name or dest_id}'로 확인하셨나요?",
                 alternatives=[],
             ))
 

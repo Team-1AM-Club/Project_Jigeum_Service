@@ -93,6 +93,38 @@ class Comparison(BaseModel):
     comparison_reason: str = Field("", description="비교 근거 요약")
 
 
+
+class Leg(BaseModel):
+    """경로의 한 구간 (leg)."""
+    leg_index: int
+    origin_place_id: str
+    destination_place_id: str
+    departure_at: str
+    arrival_at: str
+    transport_mode: str
+    line_name: Optional[str] = None
+    duration_minutes: int
+    distance_km: float = 0.0
+    instructions: Optional[str] = None
+    
+    class Config:
+        json_schema_extra = {
+            "examples": [
+                {
+                    "leg_index": 0,
+                    "origin_place_id": "place_seoul_station",
+                    "destination_place_id": "place_gangnam_station",
+                    "departure_at": "2026-09-16T18:08:00+09:00",
+                    "arrival_at": "2026-09-16T18:50:00+09:00",
+                    "transport_mode": "subway",
+                    "line_name": "2호선",
+                    "duration_minutes": 42,
+                    "distance_km": 15.0,
+                    "instructions": "서울역에서 2호선 승차, 강남역 하차",
+                }
+            ]
+        }
+
 class Plan(BaseModel):
     """경로 계획 응답.
 

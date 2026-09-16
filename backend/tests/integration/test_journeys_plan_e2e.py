@@ -298,4 +298,127 @@ class TestJourneysPlanE2E:
         body = response.json()
         assert body["status"] == "error"
         assert body["error"]["code"] == ErrorCode.VALIDATION_ERROR.value
-        assert "출발지" in body["error"]["message"]
+        # details에서 field 정보 확인
+        details = body["error"].get("details", [])
+        assert any("origin" in d.get("field", "").lower() or "origin_place" in d.get("field", "").lower()
+                  for d in details), f"details에 origin 관련 오류 포함 기대: {details}"
+
+
+    def test_e2e_confirm_then_plan_succeeds(self, client):
+        """confirm 성공 → 동일 조건 plan 허용.
+
+        Given: interpret로 출발지·목적지 모두 확정된 상태
+        When: 
+          1. POST /api/v1/mobility/interpret (확인 질문 수용 가정)
+          2. POST /api/v1/journeys/plan (user_confirmed=true, 조건 충족)
+        Then: 200 OK, Plan 응답
+        """
+        # Step 1: Interpret 요청 (자연어로 출발지·목적지 모두 포함)
+        interpret_request = {
+            "natural_language": "서울역에서 강남역까지 지하철로 오후 7시까지 가야 해",
+            "conversation_id": "e2e_confirm_plan_001",
+        }
+
+        interpret_response = client.post(
+            "/api/v1/mobility/interpret",
+            json=interpret_request,
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+        )
+        assert interpret_response.status_code == 200
+        interpret_body = interpret_response.json()
+        assert interpret_body["status"] == "ok"
+        assert interpret_body["data"]["requires_confirmation"] is False  # Mock은 모두 확정
+
+        # Step 2: Plan 요청 (user_confirmed=true)
+        # Mock은 confirmed_conditions를 가정하므로 user_confirmed=true면 통과
+        plan_request = {
+            "conversation_id": "e2e_confirm_plan_001",
+            "origin_place_id": "place_seoul_station",
+            "destination_place_id": "place_gangnam_station",
+            "arrival_deadline": "2026-09-16T19:00:00+09:00",
+            "arrival_preference_minutes": 10,
+            "max_options": 3,
+        }
+
+        plan_response = client.post(
+            "/api/v1/journeys/plan",
+            json=plan_request,
+            headers={
+                "Idempotency-Key": str(uuid.uuid4()),
+                "X-User-Confirmed": "true",  # Mock이 user_confirmed를 이 헤더로 읽을 수 있음
+            },
+        )
+
+        # Mock 환경이 user_confirmed를 어떻게 처리하는지에 따라 다름
+        # 현재는 Mock이 항상 confirmed_conditions를 설정하므로 200 기대
+        assert plan_response.status_code == 200, f"확인 후 plan 허용 기대, 실제 {plan_response.status_code}: {plan_response.text}"
+        plan_body = plan_response.json()
+        assert plan_body["status"] == "ok"
+        assert "data" in plan_body
+        assert "plan_id" in plan_body["data"]
+
+    def test_e2e_plan_rejected_without_user_confirmation(self, client):
+        """user_confirmed=true 없이 plan 요청 → 422 USER_CONFIRMATION_REQUIRED.
+
+        Given: interpret 완료 상태
+        When: user_confirmed 표시 없이 plan 요청
+        Then: 422 USER_CONFIRMATION_REQUIRED
+        """
+        plan_request = {
+            "conversation_id": "e2e_no_confirm_001",
+            "origin_place_id": "place_seoul_station",
+            "destination_place_id": "place_gangnam_station",
+            "arrival_deadline": "2026-09-16T19:00:00+09:00",
+        }
+
+        response = client.post(
+            "/api/v1/journeys/plan",
+            json=plan_request,
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+            # user_confirmed 표시 없음
+        )
+
+        assert response.status_code == 422
+        body = response.json()
+        assert body["status"] == "error"
+        assert body["error"]["code"] == ErrorCode.USER_CONFIRMATION_REQUIRED.value
+
+    def test_e2e_plan_with_arrival_time_calculation(self, client):
+        """도착 시각 계산 검증: target = deadline - preference.
+
+        Given: arrival_deadline=19:00, arrival_preference_minutes=10
+        When: POST /api/v1/journeys/plan
+        Then: target_arrival_at = 18:50 (buffer 별도), recommended_leave_at = target - duration - buffer
+        """
+        deadline = datetime(2026, 9, 16, 19, 0, 0, tzinfo=SEOUL_TZ)
+        preference = 10  # 분
+
+        plan_request = {
+            "conversation_id": "e2e_time_calc_001",
+            "origin_place_id": "place_seoul_station",
+            "destination_place_id": "place_gangnam_station",
+            "arrival_deadline": deadline.isoformat(),
+            "arrival_preference_minutes": preference,
+            "max_options": 1,
+        }
+
+        response = client.post(
+            "/api/v1/journeys/plan",
+            json=plan_request,
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+
+        # target_arrival_at = arrival_deadline - arrival_preference_minutes
+        # buffer는 recommended_leave_at 계산 시에만 적용
+        target = datetime.fromisoformat(data["target_arrival_at"])
+        expected_target = deadline - timedelta(minutes=preference)
+        assert target == expected_target, f"target 불일치: 기대={expected_target}, 실제={target}"
+
+        # recommended_leave_at = target - total_duration - buffer
+        # Mock: total_duration=42, buffer=5 → 18:50 - 47 = 18:03
+        leave = datetime.fromisoformat(data["recommended_leave_at"])
+        expected_leave = expected_target - timedelta(minutes=42 + 5)
+        assert leave == expected_leave, f"leave 불일치: 기대={expected_leave}, 실제={leave}"

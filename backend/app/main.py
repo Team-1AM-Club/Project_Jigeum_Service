@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from uuid import UUID
 from app.api.health import router as health_router
 from app.api.capabilities import router as capabilities_router
@@ -77,6 +78,71 @@ app.include_router(places_router, prefix="/api/v1")
 app.include_router(mobility_router, prefix="/api/v1")
 app.include_router(journeys_router, prefix="/api/v1")
 
+
+
+# ─────────────────────────────────────────────
+# RequestValidationError 핸들러 (Pydantic 검증 오류 → envelope)
+# ─────────────────────────────────────────────
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    from fastapi.responses import JSONResponse
+    details = []
+    for error in exc.errors():
+        loc = ".".join(str(l) for l in error.get("loc", []))
+        msg = error.get("msg", "검증 오류")
+        details.append({"field": loc or "body", "message": msg})
+    return JSONResponse(
+        status_code=422,
+        content={
+            "status": "error",
+            "data": None,
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "요청 검증에 실패했습니다.",
+                "status_code": 422,
+                "details": details,
+            },
+            "meta": {"api_version": settings.api_version},
+        },
+    )
+
+
+# ─────────────────────────────────────────────
+# HTTPException 핸들러 (dependency-injected Idempotency-Key 검증 등)
+# ─────────────────────────────────────────────
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    from fastapi.responses import JSONResponse
+    status_code = exc.status_code
+    detail = exc.detail
+    if isinstance(detail, list):
+        details = [{"field": d.get("loc", ["body"])[0] if isinstance(d, dict) else "body",
+                    "message": d.get("msg", str(d)) if isinstance(d, dict) else str(d)}
+                   for d in detail]
+        message = "요청 검증에 실패했습니다."
+    elif isinstance(detail, dict):
+        details = [{"field": str(d.get("loc", ["body"])[0] if isinstance(d, dict) else "body"),
+                    "message": str(d.get("msg", ""))}]
+        message = detail.get("message", "요청 처리 중 오류가 발생했습니다.")
+    else:
+        details = []
+        message = str(detail)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "error",
+            "data": None,
+            "error": {
+                "code": "VALIDATION_ERROR" if status_code == 422 else "UNKNOWN_ERROR",
+                "message": message,
+                "retryable": False,
+                "details": details,
+                "status_code": status_code,
+            },
+            "meta": {"api_version": settings.api_version},
+        },
+    )
 
 
 # ─────────────────────────────────────────────
