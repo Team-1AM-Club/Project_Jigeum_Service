@@ -46,3 +46,8 @@ Thumbs.db
 .idea/
 .vscode/
 .worktrees/
+
+# 테스트 환경
+backend/.test_venv_fresh/
+# 출처 미확인 파일
+test_write.txt
