@@ -383,8 +383,8 @@ class TestPlanServiceWithNoProviderResult:
         return PlanService(routing_provider=provider)
 
     @pytest.mark.asyncio
-    async def test_plan_falls_back_to_mock_when_no_options(self, plan_service):
-        """라우팅 결과 없음 → Mock 옵션 생성."""
+    async def test_plan_reports_unavailable_when_no_options(self, plan_service):
+        """빈 결과를 가상 경로로 대체하지 않는다."""
         request = TripRequest(
             conversation_id="test_fallback",
             origin_place_id="place_seoul_station",
@@ -393,9 +393,7 @@ class TestPlanServiceWithNoProviderResult:
             max_options=3,
         )
 
-        plan = await plan_service.plan(request=request, buffer_minutes=5)
+        from app.services.last_journey_service import NoFeasibleJourneyError
 
-        # Mock 옵션 생성됨
-        assert len(plan.comparison.options) >= 1
-        assert plan.comparison.options[0].option_id.startswith("opt_")
-        assert plan.total_duration_minutes > 0
+        with pytest.raises(NoFeasibleJourneyError):
+            await plan_service.plan(request=request, buffer_minutes=5)

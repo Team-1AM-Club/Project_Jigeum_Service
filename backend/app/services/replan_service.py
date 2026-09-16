@@ -9,7 +9,7 @@ User Story 3: 사용자가 놓침·변경 후 재탐색을 요청하면,
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.schemas.journeys import (
@@ -94,53 +94,50 @@ class ReplanService:
         # 새 plan 요청을 위한 TripRequest 생성
         # arrival_deadline: 현재 시각에서 적절한 마감 시각 설정
         # (기존 계획이 있으면 기존 target_arrival_at 기준으로)
-        arrival_deadline = now_seoul + timedelta(hours=2)  # 기본 2시간 후
-
-        if request.previous_plan:
-            prev_target = request.previous_plan.get("target_arrival_at")
-            if prev_target:
-                try:
-                    prev_dt = ensure_seoul(datetime.fromisoformat(prev_target))
-                    # 이전 계획 대비 최소 동일한 도착 시각 보장
-                    arrival_deadline = max(now_seoul + timedelta(minutes=30), prev_dt)
-                except (ValueError, TypeError):
-                    pass
+        arrival_deadline = request.trip.get("arrival_deadline")
 
         trip_request = TripRequest(
             conversation_id=request.conversation_id,
             origin_place_id=origin_id,
             destination_place_id=dest_id,
             arrival_deadline=arrival_deadline,
-            arrival_preference_minutes=request.previous_plan.get(
+            arrival_preference_minutes=request.trip.get(
                 "arrival_preference_minutes", 10
-            )
-            if request.previous_plan
-            else 10,
+            ),
+            kind=request.trip.get("kind", "appointment"),
+            service_date=request.trip.get("service_date"),
+            transport_modes=request.trip.get("transport_modes"),
             transport_mode=request.trip.get("transport_mode"),
             max_options=request.max_options or 3,
         )
 
         # 3. 새 경로 계산 (PlanService 사용)
-        new_plan = await self.plan_service.plan(
-            request=trip_request,
-            buffer_minutes=buffer_minutes,
-        )
+        if trip_request.kind == "last_journey":
+            from app.services.last_journey_service import LastJourneyService
+
+            new_plan = await LastJourneyService(
+                self.plan_service.routing_provider
+            ).plan_last_journey(trip_request, buffer_minutes=buffer_minutes)
+        else:
+            new_plan = await self.plan_service.plan(
+                request=trip_request, buffer_minutes=buffer_minutes
+            )
 
         # 4. 이전 선택 대비 변화 계산
         arrival_change_minutes = None
         leave_change_minutes = None
 
         if request.previous_plan:
-            prev_target_str = request.previous_plan.get("target_arrival_at")
+            prev_target_str = request.previous_plan.get("estimated_arrival_at")
             prev_leave_str = request.previous_plan.get("recommended_leave_at")
 
             if prev_target_str and new_plan.target_arrival_at:
                 try:
                     prev_target = ensure_seoul(datetime.fromisoformat(prev_target_str))
                     new_target = ensure_seoul(new_plan.target_arrival_at)
-                    arrival_change_minutes = int(
-                        (new_target - prev_target).total_seconds() / 60
-                    )
+                    arrival_change_minutes = (
+                        new_target - prev_target
+                    ).total_seconds() / 60
                 except (ValueError, TypeError):
                     pass
 
@@ -148,9 +145,7 @@ class ReplanService:
                 try:
                     prev_leave = ensure_seoul(datetime.fromisoformat(prev_leave_str))
                     new_leave = ensure_seoul(new_plan.recommended_leave_at)
-                    leave_change_minutes = int(
-                        (new_leave - prev_leave).total_seconds() / 60
-                    )
+                    leave_change_minutes = (new_leave - prev_leave).total_seconds() / 60
                 except (ValueError, TypeError):
                     pass
 
@@ -160,6 +155,12 @@ class ReplanService:
 
         # 6. ReplanResponse 생성
         comparison = ReplanComparison(
+            previous_plan_id=request.previous_plan.get("plan_id")
+            if request.previous_plan
+            else None,
+            previous_selected_option_id=request.previous_plan.get("selected_option_id")
+            if request.previous_plan
+            else None,
             new_plan=new_plan,
             arrival_change_minutes=arrival_change_minutes,
             leave_change_minutes=leave_change_minutes,

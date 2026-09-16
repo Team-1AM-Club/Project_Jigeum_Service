@@ -2,7 +2,7 @@
 
 종단 간 흐름:
 1. POST /api/v1/mobility/interpret → 자연어 해석 → TripDraft + 확인 질문
-2. (가상의 confirm 단계 - 사용자 확인 가정)
+2. confirmed_request 헬퍼가 실제 interpret·confirm HTTP 요청 수행
 3. POST /api/v1/journeys/plan → Plan 응답
 
 Mock 제공자 사용: 실제 AI/라우팅 제공자 없이 고정 응답으로 흐름 검증.
@@ -11,6 +11,8 @@ Mock 제공자 사용: 실제 AI/라우팅 제공자 없이 고정 응답으로 
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+from http_setup import confirmed_request, interpreted_request
 
 from app.schemas.errors import ErrorCode
 
@@ -40,7 +42,7 @@ class TestJourneysPlanE2E:
 
         interpret_response = client.post(
             "/api/v1/mobility/interpret",
-            json=interpret_request,
+            json=interpreted_request(client, interpret_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -49,7 +51,7 @@ class TestJourneysPlanE2E:
         )
 
         interpret_body = interpret_response.json()
-        assert interpret_body["status"] == "ok"
+        assert interpret_body["status"] == "needs_confirmation"
         assert "data" in interpret_body
 
         interpret_data = interpret_body["data"]
@@ -106,7 +108,7 @@ class TestJourneysPlanE2E:
 
         plan_response = client.post(
             "/api/v1/journeys/plan",
-            json=plan_request,
+            json=confirmed_request(client, plan_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -166,7 +168,7 @@ class TestJourneysPlanE2E:
 
         response = client.post(
             "/api/v1/mobility/interpret",
-            json=interpret_request,
+            json=interpreted_request(client, interpret_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -216,7 +218,7 @@ class TestJourneysPlanE2E:
 
         response = client.post(
             "/api/v1/mobility/interpret",
-            json=interpret_request,
+            json=interpreted_request(client, interpret_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -262,7 +264,7 @@ class TestJourneysPlanE2E:
         # Interpret
         interpret_resp = client.post(
             "/api/v1/mobility/interpret",
-            json=interpret_request,
+            json=interpreted_request(client, interpret_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
         assert interpret_resp.status_code == 200
@@ -287,7 +289,7 @@ class TestJourneysPlanE2E:
 
         plan_resp = client.post(
             "/api/v1/journeys/plan",
-            json=plan_request,
+            json=confirmed_request(client, plan_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -327,7 +329,7 @@ class TestJourneysPlanE2E:
 
         response = client.post(
             "/api/v1/journeys/plan",
-            json=plan_request,
+            json=confirmed_request(client, plan_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -363,18 +365,18 @@ class TestJourneysPlanE2E:
 
         interpret_response = client.post(
             "/api/v1/mobility/interpret",
-            json=interpret_request,
+            json=interpreted_request(client, interpret_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
         assert interpret_response.status_code == 200
         interpret_body = interpret_response.json()
-        assert interpret_body["status"] == "ok"
+        assert interpret_body["status"] == "needs_confirmation"
         assert (
-            interpret_body["data"]["requires_confirmation"] is False
-        )  # Mock은 모두 확정
+            interpret_body["data"]["requires_confirmation"] is True
+        )  # 해석은 사용자 동의가 아님
 
         # Step 2: Plan 요청 (user_confirmed=true)
-        # Mock은 confirmed_conditions를 가정하므로 user_confirmed=true면 통과
+        # confirmed_request는 DB에 초안을 저장하고 실제 confirm을 호출한다.
         plan_request = {
             "conversation_id": "e2e_confirm_plan_001",
             "origin_place_id": "place_seoul_station",
@@ -386,15 +388,13 @@ class TestJourneysPlanE2E:
 
         plan_response = client.post(
             "/api/v1/journeys/plan",
-            json=plan_request,
+            json=confirmed_request(client, plan_request),
             headers={
                 "Idempotency-Key": str(uuid.uuid4()),
-                "X-User-Confirmed": "true",  # Mock이 user_confirmed를 이 헤더로 읽을 수 있음
             },
         )
 
-        # Mock 환경이 user_confirmed를 어떻게 처리하는지에 따라 다름
-        # 현재는 Mock이 항상 confirmed_conditions를 설정하므로 200 기대
+        # 저장된 확인 조건과 일치하는 요청만 성공한다.
         assert plan_response.status_code == 200, (
             f"확인 후 plan 허용 기대, 실제 {plan_response.status_code}: {plan_response.text}"
         )
@@ -419,7 +419,7 @@ class TestJourneysPlanE2E:
 
         response = client.post(
             "/api/v1/journeys/plan",
-            json=plan_request,
+            json=confirmed_request(client, plan_request, confirm=False),
             headers={"Idempotency-Key": str(uuid.uuid4())},
             # user_confirmed 표시 없음
         )
@@ -450,7 +450,7 @@ class TestJourneysPlanE2E:
 
         response = client.post(
             "/api/v1/journeys/plan",
-            json=plan_request,
+            json=confirmed_request(client, plan_request),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 

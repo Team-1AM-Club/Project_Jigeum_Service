@@ -36,12 +36,13 @@ class TripDraft(BaseModel):
     departure_at: datetime | None = Field(None, description="출발 예정 시각")
     arrival_deadline: datetime | None = Field(None, description="도착 마감 시한")
     arrival_preference_minutes: int = Field(
-        10, ge=0, le=60, description="도착 여유 시간 (분)"
+        0, ge=0, le=120, description="도착 여유 시간 (분)"
     )
     transport_mode: str | None = Field(
         None, pattern="^(subway|bus|walking|taxi|bicycle)$", description="이동수단"
     )
     natural_language: str = Field(..., description="사용자 원본 자연어 입력")
+    ambiguities: list[str] = Field(default_factory=list)
 
     class Config:
         json_schema_extra = {
@@ -79,6 +80,8 @@ class InterpretRequest(BaseModel):
         ..., min_length=1, max_length=2000, description="사용자 자연어 입력"
     )
     conversation_id: str | None = Field(None, description="대화 ID (선택)")
+    expected_revision: int | None = Field(None, ge=1, strict=True)
+    context: dict = Field(default_factory=dict)
 
     class Config:
         json_schema_extra = {

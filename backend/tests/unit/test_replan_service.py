@@ -52,7 +52,8 @@ def valid_replan_request():
         },
         previous_plan={
             "plan_id": "plan_abc123",
-            "target_arrival_at": "2026-09-16T18:50:00+09:00",
+            "estimated_arrival_at": "2026-09-16T18:50:00+09:00",
+            "selected_option_id": "selected-option",
             "recommended_leave_at": "2026-09-16T18:08:00+09:00",
             "total_duration_minutes": 42,
         },

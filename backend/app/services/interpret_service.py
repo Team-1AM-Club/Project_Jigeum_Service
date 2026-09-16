@@ -68,9 +68,10 @@ class InterpretService:
             destination_place_name=parsed.get("destination_place_name"),
             departure_at=parsed.get("departure_at"),
             arrival_deadline=parsed.get("arrival_deadline"),
-            arrival_preference_minutes=parsed.get("arrival_preference_minutes", 10),
+            arrival_preference_minutes=parsed.get("arrival_preference_minutes", 0),
             transport_mode=parsed.get("transport_mode"),
             natural_language=natural_lang,
+            ambiguities=parsed.get("ambiguities", []),
         )
 
         requires_confirmation = (
@@ -109,14 +110,10 @@ class InterpretService:
             # 제공자 결과를 파싱하여 반환
             return self._normalize_parsed_result(model_result.data)
 
-        # 제공자 실패 → fallback: 규칙 기반 기본 해석
-        logger.warning("모델 제공자 실패, fallback 규칙 기반 해석 사용")
-        # provider에서 파싱된 deadline이 있으면 fallback에 전달
-        fallback_deadline = None
-        if model_result.ok and model_result.data:
-            normalized = self._normalize_parsed_result(model_result.data)
-            fallback_deadline = normalized.get("arrival_deadline")
-        return self._fallback_parse(text, existing_deadline=fallback_deadline)
+        # Provider failure must not manufacture a replacement draft.
+        from app.services.http_state import StateError
+
+        raise StateError("AI_UNAVAILABLE", 503)
 
     def _normalize_parsed_result(self, data: dict) -> dict:
         """모델 제공자 결과를 정규화하여 표준 형식으로 변환.
@@ -128,13 +125,14 @@ class InterpretService:
         """
         # 기본 필드 추출 (두 제공자 공통)
         result = {
+            "ambiguities": data.get("ambiguities", []),
             "origin_place_id": data.get("origin_place_id"),
             "origin_place_name": data.get("origin_place_name"),
             "destination_place_id": data.get("destination_place_id"),
             "destination_place_name": data.get("destination_place_name"),
             "departure_at": data.get("departure_at") or data.get("departure_time"),
             "arrival_deadline": data.get("arrival_deadline"),
-            "arrival_preference_minutes": data.get("arrival_preference_minutes", 10),
+            "arrival_preference_minutes": data.get("arrival_preference_minutes", 0),
             "transport_mode": data.get("transport_mode"),
         }
 
@@ -158,9 +156,9 @@ class InterpretService:
         # arrival_preference_minutes 검증
         pref = result.get("arrival_preference_minutes")
         if pref is None or not isinstance(pref, int):
-            result["arrival_preference_minutes"] = 10
+            result["arrival_preference_minutes"] = 0
         else:
-            result["arrival_preference_minutes"] = max(0, min(60, pref))
+            result["arrival_preference_minutes"] = max(0, min(120, pref))
 
         # transport_mode 검증
         mode = result.get("transport_mode")

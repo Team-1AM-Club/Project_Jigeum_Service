@@ -76,29 +76,21 @@ class PlanService:
             raise ValueError("목적지가 필요합니다.")
 
         # provider 호출 → 이동 옵션 조회
-        routing_result = await self.routing_provider.search_options(
-            origin_place_id=origin_id,
-            destination_place_id=dest_id,
-            departure_at=None,
+        from app.services.routing_search import search_options
+
+        options_data = await search_options(
+            self.routing_provider,
+            request,
             arrival_deadline=request.arrival_deadline.isoformat()
             if request.arrival_deadline
             else None,
-            transport_mode=request.transport_mode,
-            max_options=request.max_options or 3,
         )
 
-        options_data: list[dict] = []
-        if routing_result.ok and routing_result.data:
-            options_data = routing_result.data
-
-        # 후보 경로가 없으면 기본 Mock 데이터 생성
+        # Empty supported results are unavailable, never invented routes.
         if not options_data:
-            logger.info("라우팅 제공자 결과 없음, Mock 후보 생성")
-            options_data = self._generate_mock_options(
-                origin_id=origin_id,
-                dest_id=dest_id,
-                transport_mode=request.transport_mode,
-            )
+            from app.services.last_journey_service import NoFeasibleJourneyError
+
+            raise NoFeasibleJourneyError()
 
         # 후보 1~3개 제한
         candidate_options = options_data[: request.max_options or 3]

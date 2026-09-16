@@ -13,14 +13,30 @@ from app.api.places import router as places_router
 from app.config import get_settings
 
 settings = get_settings()
+from fastapi.responses import JSONResponse
+
+from app.lifecycle import lifespan
+from app.services.http_state import StateError, envelope
+
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Jigeum API",
     version=settings.api_version,
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
+
+
+# CORS
+@app.exception_handler(StateError)
+async def state_error_handler(request: Request, exc: StateError):
+    return JSONResponse(
+        status_code=exc.status,
+        content=envelope(status="error", code=exc.code, message=exc.message),
+    )
+
 
 # CORS
 app.add_middleware(
@@ -102,7 +118,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 "status_code": 422,
                 "details": details,
             },
-            "meta": {"api_version": settings.api_version},
+            "meta": envelope()["meta"],
         },
     )
 
@@ -126,14 +142,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         ]
         message = "요청 검증에 실패했습니다."
     elif isinstance(detail, dict):
-        details = [
-            {
-                "field": str(
-                    d.get("loc", ["body"])[0] if isinstance(d, dict) else "body"
-                ),
-                "message": str(d.get("msg", "")),
-            }
-        ]
+        details = detail.get("details", [])
         message = detail.get("message", "요청 처리 중 오류가 발생했습니다.")
     else:
         details = []
@@ -151,7 +160,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 "details": details,
                 "status_code": status_code,
             },
-            "meta": {"api_version": settings.api_version},
+            "meta": envelope()["meta"],
         },
     )
 
@@ -164,7 +173,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     from fastapi.responses import JSONResponse
 
     status_code = getattr(exc, "status_code", 500)
-    detail = getattr(exc, "detail", str(exc))
+    detail = "서버 내부 오류가 발생했습니다."
     return JSONResponse(
         status_code=status_code,
         content={
@@ -175,6 +184,6 @@ async def global_exception_handler(request: Request, exc: Exception):
                 "message": detail,
                 "status_code": status_code,
             },
-            "meta": {"api_version": settings.api_version},
+            "meta": envelope()["meta"],
         },
     )

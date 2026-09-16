@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationStatus
@@ -327,8 +327,19 @@ def check_and_handle_expiry(
         # 만료 → tombstone 전환
         # payload 제거 (보안상 완전히 삭제)
         conv.confirmed_conditions = None
+        conv.interpret_draft = None
+        conv.unresolved_fields = None
+        conv.conditions_confirmed = False
+        conv.places_confirmed = False
         conv.candidate_set = None
         conv.active_selected_plan = None
+        from app.models.idempotency import IdempotencyRecord
+
+        db.execute(
+            delete(IdempotencyRecord).where(
+                IdempotencyRecord.conversation_id == conversation_id
+            )
+        )
         conv.status = ConversationStatus.TOMBSTONE
         conv.updated_at = now
         db.commit()

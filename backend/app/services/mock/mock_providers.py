@@ -69,6 +69,9 @@ class MockPlaceProvider(PlaceProvider):
         },
     ]
 
+    def resolves(self, place_id: str) -> bool:
+        return any(place["place_id"] == place_id for place in self._MOCK_PLACES)
+
     async def search_places(
         self,
         query: str,

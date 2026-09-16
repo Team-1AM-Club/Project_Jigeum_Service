@@ -10,6 +10,8 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from http_setup import confirmed_request
+
 from app.schemas.journeys import TripRequest
 from app.services.provider_interfaces import ProviderResult, RoutingProvider
 
@@ -26,13 +28,17 @@ class TestLastJourneyE2EWithActualMock:
         """
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json={
-                "conversation_id": "e2e_last_001",
-                "origin_place_id": "place_seoul_station",
-                "destination_place_id": "place_gangnam_station",
-                "arrival_deadline": "2026-09-17T00:30:00+09:00",
-                "arrival_preference_minutes": 10,
-            },
+            json=confirmed_request(
+                client,
+                {
+                    "conversation_id": "e2e_last_001",
+                    "origin_place_id": "place_seoul_station",
+                    "destination_place_id": "place_gangnam_station",
+                    "arrival_deadline": "2026-09-17T00:30:00+09:00",
+                    "arrival_preference_minutes": 10,
+                },
+                last=True,
+            ),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -49,12 +55,16 @@ class TestLastJourneyE2EWithActualMock:
         """성공 응답도 공통 envelope 구조 준수."""
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json={
-                "conversation_id": "e2e_last_002",
-                "origin_place_id": "place_seoul_station",
-                "destination_place_id": "place_gangnam_station",
-                "arrival_deadline": "2026-09-17T00:30:00+09:00",
-            },
+            json=confirmed_request(
+                client,
+                {
+                    "conversation_id": "e2e_last_002",
+                    "origin_place_id": "place_seoul_station",
+                    "destination_place_id": "place_gangnam_station",
+                    "arrival_deadline": "2026-09-17T00:30:00+09:00",
+                },
+                last=True,
+            ),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -75,11 +85,15 @@ class TestLastJourneyE2EWithActualMock:
         # 출발지 누락
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json={
-                "conversation_id": "e2e_last_003",
-                "origin_place_id": "",  # 빈 값
-                "destination_place_id": "place_gangnam_station",
-            },
+            json=confirmed_request(
+                client,
+                {
+                    "conversation_id": "e2e_last_003",
+                    "origin_place_id": "",  # 빈 값
+                    "destination_place_id": "place_gangnam_station",
+                },
+                last=True,
+            ),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -99,11 +113,15 @@ class TestLastJourneyE2EWithActualMock:
         """Idempotency-Key 검증: 누락 시 422."""
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json={
-                "conversation_id": "e2e_last_004",
-                "origin_place_id": "place_seoul_station",
-                "destination_place_id": "place_gangnam_station",
-            },
+            json=confirmed_request(
+                client,
+                {
+                    "conversation_id": "e2e_last_004",
+                    "origin_place_id": "place_seoul_station",
+                    "destination_place_id": "place_gangnam_station",
+                },
+                last=True,
+            ),
             # Idempotency-Key 없음
         )
 
@@ -191,14 +209,18 @@ class TestLastJourneyE2EWithActualMock:
 
             response = client.post(
                 "/api/v1/journeys/plan/last_journey",
-                json={
-                    "conversation_id": "e2e_last_005",
-                    "origin_place_id": "place_seoul_station",
-                    "destination_place_id": "place_gangnam_station",
-                    "arrival_deadline": "2026-09-17T00:30:00+09:00",
-                    "arrival_preference_minutes": 10,
-                    "max_options": 3,
-                },
+                json=confirmed_request(
+                    client,
+                    {
+                        "conversation_id": "e2e_last_005",
+                        "origin_place_id": "place_seoul_station",
+                        "destination_place_id": "place_gangnam_station",
+                        "arrival_deadline": "2026-09-17T00:30:00+09:00",
+                        "arrival_preference_minutes": 10,
+                        "max_options": 3,
+                    },
+                    last=True,
+                ),
                 headers={"Idempotency-Key": str(uuid.uuid4())},
             )
 

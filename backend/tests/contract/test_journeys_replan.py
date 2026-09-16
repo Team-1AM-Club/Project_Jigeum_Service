@@ -9,6 +9,8 @@
 import uuid
 from zoneinfo import ZoneInfo
 
+from http_setup import confirmed_request
+
 from app.schemas.errors import ErrorCode
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -44,7 +46,7 @@ class TestReplanContract:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -64,7 +66,7 @@ class TestReplanContract:
         # ReplanResponse 구조 검증
         assert "replan_id" in data, "replan_id 누락"
         assert "conversation_id" in data, "conversation_id 누락"
-        assert data["conversation_id"] == "test_replan_001"
+        assert data["conversation_id"] == request_body["conversation_id"]
         assert "reason" in data, "reason 누락"
         assert data["reason"] == "missed_connection"
         assert "comparison" in data, "comparison 누락"
@@ -136,7 +138,7 @@ class TestReplanContract:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -145,16 +147,10 @@ class TestReplanContract:
         comparison = data["comparison"]
 
         # arrival_change_minutes는 숫자
-        assert (
-            isinstance(comparison["arrival_change_minutes"], int)
-            or comparison["arrival_change_minutes"] is None
-        )
+        assert isinstance(comparison["arrival_change_minutes"], (int, float))
 
         # leave_change_minutes도 숫자 또는 None
-        assert (
-            isinstance(comparison["leave_change_minutes"], int)
-            or comparison["leave_change_minutes"] is None
-        )
+        assert isinstance(comparison["leave_change_minutes"], (int, float))
 
     def test_replan_previous_plan_preserved(self, client):
         """이전 선택 보존 검증.
@@ -180,7 +176,7 @@ class TestReplanContract:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -213,7 +209,7 @@ class TestReplanContract:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -243,7 +239,7 @@ class TestReplanContract:
 
             response = client.post(
                 "/api/v1/journeys/replan",
-                json=request_body,
+                json=confirmed_request(client, request_body, replan=True),
                 headers={"Idempotency-Key": str(uuid.uuid4())},
             )
 
@@ -329,7 +325,7 @@ class TestReplanContract:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -359,7 +355,7 @@ class TestReplanContract:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             # Idempotency-Key 없음
         )
 

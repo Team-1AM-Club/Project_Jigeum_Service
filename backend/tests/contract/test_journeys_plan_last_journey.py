@@ -9,6 +9,8 @@
 import uuid
 from zoneinfo import ZoneInfo
 
+from http_setup import confirmed_request
+
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
 
@@ -33,7 +35,7 @@ class TestLastJourneyContract:
 
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json=request_body,
+            json=confirmed_request(client, request_body, last=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -80,7 +82,7 @@ class TestLastJourneyContract:
 
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json=valid_request,
+            json=confirmed_request(client, valid_request, last=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -96,7 +98,7 @@ class TestLastJourneyContract:
 
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json=invalid_request,
+            json=confirmed_request(client, invalid_request, last=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -126,7 +128,7 @@ class TestLastJourneyContract:
 
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json=request_body,
+            json=confirmed_request(client, request_body, last=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -193,7 +195,7 @@ class TestLastJourneyContract:
 
         response = client.post(
             "/api/v1/journeys/plan/last_journey",
-            json=request_body,
+            json=confirmed_request(client, request_body, last=True),
             # Idempotency-Key 헤더 없음
         )
 

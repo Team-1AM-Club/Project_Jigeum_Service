@@ -119,6 +119,10 @@ class LastJourneyService:
 
         # 2. 운행일 검증 (현재 날짜 기준)
         now_seoul = datetime.now(SEOUL_TZ)
+        if request.service_date:
+            now_seoul = datetime.fromisoformat(request.service_date).replace(
+                tzinfo=SEOUL_TZ
+            )
         operating_date = now_seoul.strftime("%Y-%m-%d")
 
         # 막차 운행 시간: 보통 23:00~00:30 사이 (자정 경계)
@@ -135,23 +139,19 @@ class LastJourneyService:
         arrival_deadline = (
             ensure_seoul(request.arrival_deadline)
             if request.arrival_deadline
-            else now_seoul + timedelta(hours=1)
+            else last_departure_start + timedelta(hours=2)
         )
 
         # 3. 막차 경로 후보 계산
         # Mock 제공자 사용: 교통수단 필터 없이 검색
-        routing_result = await self.routing_provider.search_options(
-            origin_place_id=request.origin_place_id,
-            destination_place_id=request.destination_place_id,
-            departure_at=last_departure_start.isoformat(),
-            arrival_deadline=arrival_deadline.isoformat() if arrival_deadline else None,
-            transport_mode=request.transport_mode,
-            max_options=request.max_options or 3,
-        )
+        from app.services.routing_search import search_options
 
-        options_data: list[dict] = []
-        if routing_result.ok and routing_result.data:
-            options_data = routing_result.data
+        options_data = await search_options(
+            self.routing_provider,
+            request,
+            departure_at=last_departure_start.isoformat(),
+            arrival_deadline=arrival_deadline.isoformat(),
+        )
 
         # 4. 지원 범위에서 경로 없으면 NO_FEASIBLE_JOURNEY
         if not options_data:

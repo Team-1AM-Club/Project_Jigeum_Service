@@ -1,5 +1,115 @@
 # 지금 — MCP 서비스용 백엔드 계산 API 명세 v0.1
 
+## 2026-09-16 확인 상태 구현 계약
+
+이 절은 `feature/backend-confirm-completion`에서 실제 구현·HTTP 검증한 계약이다.
+아래 초기 설계 문단과 충돌하는 확인·상태·요청 형식은 이 절을 우선한다.
+기존 계산 서비스의 Plan/Comparison 응답 형태는 유지했다. 아래 초기 설계의
+중첩 Plan·PlaceSlot 형태를 구현 완료로 해석하지 않는다. 최신 실행 예제는
+`Docs/api/examples.json`이며 모두 Mock provider의 demo 응답이다.
+
+### 실제 등록 API: 8개
+
+| Method | 전체 경로 | 역할 |
+|---|---|---|
+| GET | `/api/v1/health` | 연결 확인 |
+| GET | `/api/v1/capabilities` | Mock 지원 범위·기본값 |
+| GET | `/api/v1/places` | Mock 장소 검색 |
+| POST | `/api/v1/mobility/interpret` | 초안 저장·갱신 |
+| POST | `/api/v1/conversations/{conversation_id}/confirm` | 저장 초안에 대한 사용자 확인 |
+| POST | `/api/v1/journeys/plan` | kind별 계산 |
+| POST | `/api/v1/journeys/plan/last_journey` | 기존 막차 전용 경로, kind=last_journey 필수 |
+| POST | `/api/v1/journeys/replan` | 확인된 현재 조건으로 재탐색 |
+
+`/docs`, `/redoc`, `/openapi.json`은 위 업무 API 개수에 포함하지 않는다.
+서버 선택 API는 없다. 실제 선택된 plan_id와 option_id는 Hermes/MCP 대화가 관리한다.
+
+### 계산 조건과 정규화
+
+`confirmed_data`는 다음 7개 조건만 받는다. 장소 ID는 Mock 장소 목록에서 해석 가능해야 한다.
+
+| 필드 | appointment | last_journey |
+|---|---|---|
+| kind | appointment | last_journey |
+| origin_place_id | 필수, 공백 불가 | 동일 |
+| destination_place_id | 필수, 공백 불가 | 동일 |
+| arrival_deadline | 오프셋 포함 datetime 필수 | null |
+| arrival_preference_minutes | 0~120 정수, 생략/null은 기본 0 | 0, 생략/null도 0으로 정규화 |
+| service_date | null | YYYY-MM-DD 필수 |
+| transport_modes | subway/bus 배열, 생략/null은 두 수단 | 동일 |
+
+교통수단 배열의 순서·중복은 비교 전에 제거한다. 빈 배열은 허용하지 않는다.
+도보는 연결 구간으로 허용하며 선택 교통수단 enum은 아니다. 택시는 지원하지 않는다.
+datetime은 UTC로 변환하여 같은 순간인지 비교한다. 조건 정규화와 멱등성 payload
+hash는 별개다. 멱등성은 전체 원본 JSON의 배열 순서·null/생략 차이를 보존한다.
+
+### interpret → confirm → plan
+
+1. interpret 본문: `natural_language`(필수), `context`(위 조건의 명시적 보완값 및
+   `ambiguities` 문자열 배열), `conversation_id`/`expected_revision`(후속 요청).
+   최초 요청은 conversation_id를 생략한다. 존재하지 않는 ID를 임의로 만들면 404다.
+2. interpret는 DB에 `interpret_draft`, 미해결 필드, revision을 저장한다.
+   응답 data는 `trip_draft`, `ready_for_plan`, `missing_fields`,
+   `confirmation_questions`, `requires_confirmation`, `next_action`이다.
+   `ready_for_plan=true`도 동의가 아니다. 확인 절차를 안내하는 status는
+   `needs_confirmation`, `requires_confirmation=true`, `next_action=confirm`이다.
+3. 사용자 동의 후 confirm 본문으로 `expected_revision`과 `confirmed_data`를 보낸다.
+   서버 저장 초안과 정규화된 조건이 같고 미해결 항목이 없어야 한다.
+   confirm의 임의 값으로 초안을 덮어쓰지 않는다. 성공 시 `confirmed_conditions`,
+   `conditions_confirmed=true`, `places_confirmed=true`를 저장하고 revision을 증가시킨다.
+4. plan은 기존 평면 본문 형식을 유지한다: `conversation_id`, `expected_revision`,
+   위 7개 조건, 선택 `max_options`(기본 3, 1~5).
+   이전 단일 `transport_mode`는 subway/bus만 대응하며 복수 필드와 충돌하면 거절한다.
+   `user_confirmed`나 `X-User-Confirmed`만으로 저장된 확인을 대체할 수 없다.
+5. plan은 확인 조건·두 플래그와 요청 조건의 일치를 모두 검사한다.
+   확인 누락/불일치는 422 USER_CONFIRMATION_REQUIRED, revision 불일치는
+   409 CONVERSATION_VERSION_CONFLICT다. 필수 스키마 오류는 422 VALIDATION_ERROR다.
+6. 후속 interpret에서 실질 조건이 바뀌거나 미해결 항목이 생기면 확인을 무효화한다.
+   같은 정규화 조건이고 새 미해결 항목이 없으면 기존 확인을 유지한다.
+
+meta는 `conversation_id`, `revision`, `expires_at`, `request_id`, `server_time`,
+`api_version`, `is_demo=true`를 포함한다. 실패 응답에는 대화 상태 meta가 없을 수 있다.
+
+### replan
+
+본문: `conversation_id`, `expected_revision`, `trip`(위 조건),
+`current_origin_place_id`, `reason`(missed_connection/route_changed/manual),
+`user_confirmed=true`, `previous_plan`, 선택 `max_options`.
+
+`previous_plan`은 실제 선택한 `plan_id`, `selected_option_id`,
+`recommended_leave_at`, `estimated_arrival_at` 네 필드이며 시각에는 오프셋이 필요하다.
+서버가 이 선택을 소유하거나 과거 plan_id를 조회하여 진위를 보증하지 않는다.
+현재 출발지로 바뀐 조건 전체가 저장 확인과 일치해야 한다. 변경 시 먼저 interpret와
+confirm을 다시 수행한다. 기존 Deadline을 현재 시각 기준으로 임의 연장하지 않는다.
+비교는 이전 선택의 estimated_arrival_at을 사용하며 소수 분 차이를 보존한다.
+응답은 기존 `replan_id`, `conversation_id`, `reason`, `comparison`, `notes` 구조이며
+comparison에 `new_plan`, `previous_plan_id`, `previous_selected_option_id`,
+`arrival_change_minutes`, `leave_change_minutes`, `previous_plan_preserved`,
+`previous_plan_valid`가 있다. 새 후보 저장은 선택 적용이 아니며 active_selected_plan을 변경하지 않는다.
+
+### DB·멱등성과 오류
+
+- 모든 POST에 UUIDv4 표준 36자 Idempotency-Key가 필수다. 성공 응답을 DB에 저장하며
+  동일 key·동일 요청은 계산·revision 증가·TTL 갱신 없이 원본 응답을 그대로 재생한다.
+- 범위는 conversation_id + key다. 같은 대화에서 다른 연산/path로 재사용해도 409
+  IDEMPOTENCY_KEY_REUSED다. 최초 interpret는 key로 안정적인 신규 대화 ID를 연결해 중복 생성을 막는다.
+- 만료 검사는 재생보다 먼저, 재생은 stale revision 검사보다 먼저 한다.
+- provider 호출 전 읽기 트랜잭션을 종료한다. 결과 후 유효성·key·revision을 다시 확인하고
+  SQL revision 조건부 UPDATE + 상태 변경 + 멱등성 기록을 한 트랜잭션으로 커밋한다.
+- provider 장애는 상태·revision·updated_at·TTL을 바꾸지 않는다. 가상 경로 fallback을 하지 않는다.
+- LAST_JOURNEY_UNSUPPORTED / NO_FEASIBLE_JOURNEY는 HTTP 200, status=unavailable,
+  data=null이다. 이 업무 결과도 재생되며 기존 후보·선택을 지우지 않는다.
+- 신규 DB는 시작 시 생성한다. 기존 로컬 DB에는 확인용 컬럼만 추가하며 기존 행을 자동 확인하지 않는다.
+  대화 TTL은 24시간, tombstone 보존은 24시간이다. 시작 시·60초마다·요청 시 만료를 검사한다.
+- 이 구현은 Mock 전용이다. 실제 막차 검증·교통 조회·서비스 Agent 실행이나 배포 완료를 뜻하지 않는다.
+
+---
+
+## 초기 제품·계산 설계 참고
+
+이하 내용은 기존 상세 설계와 목표 응답 설명을 보존한 자료다.
+현재 실행 요청·확인 흐름·라우트 목록은 위 구현 계약과 최신 examples.json을 따른다.
+
 - 작성일: 2026-09-12 / 제품 방향 설명 갱신: 2026-09-14
 - 상태: **구현을 위한 계약 초안**. 실행·배포 완료를 의미하지 않는다.
 - 제품: 지금은 MCP로 제공한다. Hermes는 개발·시연용 MCP 클라이언트이며 독립 사용자 클라이언트를 만들지 않는다.

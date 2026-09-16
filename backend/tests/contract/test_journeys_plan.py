@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+from http_setup import confirmed_request
 
 from app.schemas.errors import ErrorCode
 
@@ -39,7 +40,7 @@ class TestJourneysPlanContract:
 
         response = client.post(
             "/api/v1/journeys/plan",
-            json=request_body,
+            json=confirmed_request(client, request_body),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -59,7 +60,7 @@ class TestJourneysPlanContract:
         data = body["data"]
         assert "plan_id" in data, "plan_id 누락"
         assert "conversation_id" in data, "conversation_id 누락"
-        assert data["conversation_id"] == "test_conv_001"
+        assert data["conversation_id"] == request_body["conversation_id"]
         assert "origin_place_id" in data, "origin_place_id 누락"
         assert data["origin_place_id"] == "place_seoul_station"
         assert "destination_place_id" in data, "destination_place_id 누락"
@@ -174,7 +175,7 @@ class TestJourneysPlanContract:
 
         response = client.post(
             "/api/v1/journeys/plan",
-            json=request_body,
+            json=confirmed_request(client, request_body),
             # Idempotency-Key 헤더 없음
         )
 
@@ -198,7 +199,7 @@ class TestJourneysPlanContract:
 
         response = client.post(
             "/api/v1/journeys/plan",
-            json=request_body,
+            json=confirmed_request(client, request_body),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -245,7 +246,7 @@ class TestJourneysPlanContract:
 
         response = client.post(
             "/api/v1/journeys/plan",
-            json=request_body,
+            json=confirmed_request(client, request_body),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 

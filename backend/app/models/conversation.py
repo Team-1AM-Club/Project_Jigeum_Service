@@ -8,7 +8,7 @@ import enum
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import declarative_base
 
@@ -57,6 +57,10 @@ class Conversation(Base):
     )
     _expires_at = Column("expires_at", DateTime(timezone=True), nullable=True)
     confirmed_conditions = Column(JSON, nullable=True)
+    interpret_draft = Column(JSON, nullable=True)
+    unresolved_fields = Column(JSON, nullable=True)
+    conditions_confirmed = Column(Boolean, nullable=False, default=False)
+    places_confirmed = Column(Boolean, nullable=False, default=False)
 
     @property
     def expires_at(self):
@@ -84,6 +88,10 @@ class Conversation(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "confirmed_conditions": self.confirmed_conditions,
+            "interpret_draft": self.interpret_draft,
+            "unresolved_fields": self.unresolved_fields,
+            "conditions_confirmed": self.conditions_confirmed,
+            "places_confirmed": self.places_confirmed,
             "candidate_set": self.candidate_set,
             "active_selected_plan": self.active_selected_plan,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

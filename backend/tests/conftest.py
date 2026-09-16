@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.main import app
 from app.services.mock.mock_providers import (
     MockModelProvider,
     MockPlaceProvider,
@@ -21,6 +21,7 @@ TEST_DATABASE_URL = "sqlite:///:memory:"
 test_engine = create_engine(
     TEST_DATABASE_URL,
     connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
@@ -31,8 +32,8 @@ Base = declarative_base()
 # 모든 모델 테이블 생성 (테스트 전용)
 def create_test_tables():
     from app.models.conversation import Base as ConvBase
+    from app.models.idempotency import Base as IdemBase
     from app.models.plan import Base as PlanBase
-    from app.services.idempotency import Base as IdemBase
 
     # 메타데이터 병합
     ConvBase.metadata.create_all(test_engine)
@@ -52,7 +53,9 @@ def db_session(test_db_engine):
     """테스트 DB 세션 (함수 범위, 롤백)."""
     connection = test_db_engine.connect()
     transaction = connection.begin()
-    session = TestSessionLocal(bind=connection)
+    session = TestSessionLocal(
+        bind=connection, join_transaction_mode="create_savepoint"
+    )
 
     yield session
 
@@ -79,10 +82,15 @@ def client(db_session):
     주의: 실제 app은 get_db 의존성 사용. 테스트에서는 의존성 오버라이드 필요.
     간단한 테스트를 위해 app을 직접 사용.
     """
+    from app.db import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
 
     # 테스트용 클라이언트는 app 전역 사용
     with TestClient(app) as c:
         yield c
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture(scope="function")

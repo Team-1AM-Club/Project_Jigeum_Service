@@ -33,9 +33,11 @@ async def get_capabilities() -> Envelope:
         "last_journey": {
             "supported": True,
         },
-        "transport_modes": ["subway", "bus", "walking", "taxi", "bicycle"],
+        "transport_modes": ["subway", "bus"],
         "max_options": 10,
         "defaults": {
+            "arrival_preference_minutes": 0,
+            "transport_modes": ["subway", "bus"],
             "transport_mode": "subway",
             "max_options": 5,
             "radius_meters": 5000,

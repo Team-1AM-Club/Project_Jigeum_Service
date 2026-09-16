@@ -10,6 +10,8 @@
 import uuid
 from zoneinfo import ZoneInfo
 
+from http_setup import confirmed_request
+
 from app.schemas.errors import ErrorCode
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -40,7 +42,7 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -60,7 +62,7 @@ class TestReplanE2EWithActualMock:
         # ReplanResponse 구조
         assert "replan_id" in data
         assert "conversation_id" in data
-        assert data["conversation_id"] == "e2e_replan_001"
+        assert data["conversation_id"] == request_body["conversation_id"]
         assert data["reason"] == "missed_connection"
         assert "comparison" in data
         assert "notes" in data
@@ -93,7 +95,7 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -126,7 +128,7 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -134,16 +136,10 @@ class TestReplanE2EWithActualMock:
         comparison = response.json()["data"]["comparison"]
 
         # arrival_change_minutes는 정수 또는 None
-        assert (
-            isinstance(comparison["arrival_change_minutes"], int)
-            or comparison["arrival_change_minutes"] is None
-        )
+        assert isinstance(comparison["arrival_change_minutes"], (int, float))
 
         # leave_change_minutes도 정수 또는 None
-        assert (
-            isinstance(comparison["leave_change_minutes"], int)
-            or comparison["leave_change_minutes"] is None
-        )
+        assert isinstance(comparison["leave_change_minutes"], (int, float))
 
     def test_e2e_replan_user_confirmed_required(self, client):
         """user_confirmed=false → 422 USER_CONFIRMATION_REQUIRED."""
@@ -159,7 +155,7 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -235,7 +231,7 @@ class TestReplanE2EWithActualMock:
 
             response = client.post(
                 "/api/v1/journeys/replan",
-                json=request_body,
+                json=confirmed_request(client, request_body, replan=True),
                 headers={"Idempotency-Key": str(uuid.uuid4())},
             )
 
@@ -245,7 +241,7 @@ class TestReplanE2EWithActualMock:
             )
 
     def test_e2e_replan_no_previous_plan(self, client):
-        """이전 계획 없이 재탐색 가능."""
+        """이전 선택 요약이 없으면 재탐색을 거절한다."""
         request_body = {
             "conversation_id": "e2e_replan_007",
             "trip": {
@@ -259,19 +255,12 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
-        assert response.status_code == 200
-        comparison = response.json()["data"]["comparison"]
-
-        # 이전 계획 없으므로 변화는 None
-        assert comparison["arrival_change_minutes"] is None
-        assert comparison["leave_change_minutes"] is None
-
-        # 이전 선택 보존 (이전 계획이 없어도 True)
-        assert comparison["previous_plan_preserved"] is True
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
     def test_e2e_replan_with_current_origin_different(self, client):
         """현재 위치가 변경된 재탐색."""
@@ -288,7 +277,7 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
@@ -317,7 +306,7 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             # Idempotency-Key 없음
         )
 
@@ -351,7 +340,7 @@ class TestReplanE2EWithActualMock:
         # 잘못된 UUID
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": "not-a-uuid"},
         )
 
@@ -390,7 +379,7 @@ class TestReplanE2EWithActualMock:
 
         response = client.post(
             "/api/v1/journeys/replan",
-            json=request_body,
+            json=confirmed_request(client, request_body, replan=True),
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 

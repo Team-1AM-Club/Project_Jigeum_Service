@@ -59,13 +59,17 @@ class TripRequest(BaseModel):
     """
 
     conversation_id: str = Field(..., description="대화 ID")
+    expected_revision: int | None = Field(None, ge=1, strict=True)
+    kind: str = "appointment"
+    service_date: str | None = None
+    transport_modes: list[str] | None = None
     origin_place_id: str = Field(
         ..., min_length=1, description="출발지 장소 ID (빈 값이면 422)"
     )
     destination_place_id: str = Field(..., min_length=1, description="목적지 장소 ID")
     arrival_deadline: datetime | None = Field(None, description="도착 마감 시한")
-    arrival_preference_minutes: int = Field(
-        10, ge=0, le=60, description="도착 여유 시간 (분)"
+    arrival_preference_minutes: int | None = Field(
+        None, ge=0, le=120, description="도착 여유 시간 (분)"
     )
     transport_mode: str | None = Field(
         None, pattern="^(subway|bus|walking|taxi|bicycle)$", description="이동수단 필터"
@@ -235,6 +239,7 @@ class ReplanRequest(BaseModel):
     """
 
     conversation_id: str = Field(..., description="대화 ID")
+    expected_revision: int | None = Field(None, ge=1, strict=True)
     trip: dict = Field(..., description="재탐색할 Trip 정보 (origin/destination 등)")
     previous_plan: dict | None = Field(
         None, description="이전 선택 계획 (도착 변화 비교용)"
@@ -243,7 +248,7 @@ class ReplanRequest(BaseModel):
         None, description="현재 위치 (변경된 출발지)"
     )
     reason: ReplanReason = Field(..., description="재탐색 사유")
-    user_confirmed: bool = Field(True, description="사용자 확인 여부")
+    user_confirmed: bool = Field(False, strict=True, description="사용자 확인 여부")
     max_options: int = Field(3, ge=1, le=5, description="최대 후보 경로 수")
 
     class Config:
@@ -274,10 +279,12 @@ class ReplanComparison(BaseModel):
     """재탐색 비교 정보."""
 
     new_plan: Plan = Field(..., description="새로 계산된 계획")
-    arrival_change_minutes: int | None = Field(
+    previous_plan_id: str | None = None
+    previous_selected_option_id: str | None = None
+    arrival_change_minutes: float | None = Field(
         None, description="도착 시각 변화 (분, 양수=더 늦게, 음수=더 일찍)"
     )
-    leave_change_minutes: int | None = Field(
+    leave_change_minutes: float | None = Field(
         None, description="출발 시각 변화 (분, 양수=더 늦게, 음수=더 일찍)"
     )
     previous_plan_preserved: bool = Field(
