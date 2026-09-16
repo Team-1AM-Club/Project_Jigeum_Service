@@ -7,23 +7,17 @@ T039: plan_service.py 생성.
 """
 
 import logging
-from typing import Optional, List
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.schemas.journeys import (
-    TripRequest,
+    Comparison,
     Plan,
     PlanSummary,
-    Comparison,
-    RouteOption,
-    RouteLeg,
+    TripRequest,
 )
-from app.schemas.buffer import BufferPlan, Leg as BufferLeg
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
+from app.services.provider_interfaces import RoutingProvider
 from app.services.time_calculation import (
-    compute_target_arrival_at,
-    compute_recommended_leave_at,
     ensure_seoul,
 )
 
@@ -86,12 +80,14 @@ class PlanService:
             origin_place_id=origin_id,
             destination_place_id=dest_id,
             departure_at=None,
-            arrival_deadline=request.arrival_deadline.isoformat() if request.arrival_deadline else None,
+            arrival_deadline=request.arrival_deadline.isoformat()
+            if request.arrival_deadline
+            else None,
             transport_mode=request.transport_mode,
             max_options=request.max_options or 3,
         )
 
-        options_data: List[dict] = []
+        options_data: list[dict] = []
         if routing_result.ok and routing_result.data:
             options_data = routing_result.data
 
@@ -105,14 +101,18 @@ class PlanService:
             )
 
         # 후보 1~3개 제한
-        candidate_options = options_data[:request.max_options or 3]
+        candidate_options = options_data[: request.max_options or 3]
 
         # target_arrival_at = arrival_deadline - arrival_preference_minutes
         # (buffer는 recommended_leave_at 계산 시 적용)
-        arrival_deadline = ensure_seoul(request.arrival_deadline) if request.arrival_deadline else datetime.now(SEOUL_TZ)
+        arrival_deadline = (
+            ensure_seoul(request.arrival_deadline)
+            if request.arrival_deadline
+            else datetime.now(SEOUL_TZ)
+        )
 
         # 후보별 권장 출발시각 계산
-        plan_summaries: List[PlanSummary] = []
+        plan_summaries: list[PlanSummary] = []
         selected_option_id = None
 
         for idx, opt_data in enumerate(candidate_options):
@@ -183,8 +183,8 @@ class PlanService:
             comparison=comparison,
             buffer_applied=buffer_minutes,
             notes=f"권장 출발시각: {selected_summary.recommended_leave_at.strftime('%H:%M')} "
-                  f"(도착 마감 {arrival_deadline.strftime('%H:%M')} 기준, "
-                  f"여유 {request.arrival_preference_minutes or 0}분 + Buffer {buffer_minutes}분)",
+            f"(도착 마감 {arrival_deadline.strftime('%H:%M')} 기준, "
+            f"여유 {request.arrival_preference_minutes or 0}분 + Buffer {buffer_minutes}분)",
         )
 
         return plan
@@ -193,8 +193,8 @@ class PlanService:
         self,
         origin_id: str,
         dest_id: str,
-        transport_mode: Optional[str] = None,
-    ) -> List[dict]:
+        transport_mode: str | None = None,
+    ) -> list[dict]:
         """Mock 이동 옵션 생성 (제공자 결과 없을 때 fallback)."""
         import random
 
@@ -205,7 +205,7 @@ class PlanService:
         for i in range(min(3, random.randint(1, 3))):
             duration = base_duration + random.randint(-5, 10)
             option = {
-                "option_id": f"opt_{mode}_{i+1}",
+                "option_id": f"opt_{mode}_{i + 1}",
                 "legs": [
                     {
                         "mode": mode,
@@ -213,7 +213,7 @@ class PlanService:
                         "arrival_at": None,
                         "origin_place_id": origin_id,
                         "destination_place_id": dest_id,
-                        "route_id": f"route_{i+1}",
+                        "route_id": f"route_{i + 1}",
                         "leg_index": 0,
                         "duration_minutes": duration,
                         "distance_meters": duration * 500,
@@ -234,7 +234,7 @@ class PlanService:
     def _generate_reasoning(
         self,
         opt_data: dict,
-        transport_mode: Optional[str],
+        transport_mode: str | None,
         total_duration: int,
         target_arrival: datetime,
         buffer_minutes: int,
@@ -248,13 +248,15 @@ class PlanService:
         if mode == "subway":
             parts.append(f"지하철 이용, {total_duration}분 소요")
             if len(legs) > 1:
-                parts.append(f"환승 {len(legs)-1}회 포함")
+                parts.append(f"환승 {len(legs) - 1}회 포함")
             else:
                 parts.append("직행 노선")
         elif mode == "bus":
             parts.append(f"버스 이용, {total_duration}분 소요")
         elif mode == "walking":
-            parts.append(f"도보 {total_duration}분 ({opt_data.get('total_distance_meters', 0)//1000}km)")
+            parts.append(
+                f"도보 {total_duration}분 ({opt_data.get('total_distance_meters', 0) // 1000}km)"
+            )
         elif mode == "taxi":
             parts.append(f"택시 이용, 약 {total_duration}분")
         else:
@@ -263,11 +265,13 @@ class PlanService:
         # 도착 마감 기준 설명
         deadline_str = target_arrival.strftime("%H:%M")
         parts.append(f"도착 마감 {deadline_str} 기준")
-        parts.append(f"도착 여유 {arrival_preference}분 + Buffer {buffer_minutes}분 반영")
+        parts.append(
+            f"도착 여유 {arrival_preference}분 + Buffer {buffer_minutes}분 반영"
+        )
 
         return ", ".join(parts)
 
-    def _generate_comparison_reason(self, summaries: List[PlanSummary]) -> str:
+    def _generate_comparison_reason(self, summaries: list[PlanSummary]) -> str:
         """비교 근거 요약 생성."""
         if not summaries:
             return ""
@@ -279,10 +283,9 @@ class PlanService:
             f"권장 출발시각: {fastest.recommended_leave_at.strftime('%H:%M')}"
         )
 
-
-# ─────────────────────────────────────────────
-# 막차 계획 통합 (User Story 2 - T047)
-# ─────────────────────────────────────────────
+    # ─────────────────────────────────────────────
+    # 막차 계획 통합 (User Story 2 - T047)
+    # ─────────────────────────────────────────────
 
     async def plan_last_journey(
         self,
@@ -305,8 +308,6 @@ class PlanService:
         """
         from app.services.last_journey_service import (
             LastJourneyService,
-            LastJourneyUnsupportedError,
-            NoFeasibleJourneyError,
         )
 
         # 출발지 확정 검증
@@ -317,7 +318,9 @@ class PlanService:
             )
 
         # 막차 서비스 생성 및 실행
-        last_journey_service = LastJourneyService(routing_provider=self.routing_provider)
+        last_journey_service = LastJourneyService(
+            routing_provider=self.routing_provider
+        )
         return await last_journey_service.plan_last_journey(
             request=request,
             buffer_minutes=buffer_minutes,
@@ -337,7 +340,9 @@ class PlanService:
         """
         from app.services.last_journey_service import LastJourneyService
 
-        last_journey_service = LastJourneyService(routing_provider=self.routing_provider)
+        last_journey_service = LastJourneyService(
+            routing_provider=self.routing_provider
+        )
 
         supported = await last_journey_service.check_last_journey_supported()
 
@@ -352,7 +357,9 @@ class PlanService:
         try:
             # 제공자에게 막차 시간대 옵션 조회 시도
             now_seoul = datetime.now(SEOUL_TZ)
-            last_departure = now_seoul.replace(hour=23, minute=0, second=0, microsecond=0)
+            last_departure = now_seoul.replace(
+                hour=23, minute=0, second=0, microsecond=0
+            )
 
             result = await self.routing_provider.search_options(
                 origin_place_id=request.origin_place_id,

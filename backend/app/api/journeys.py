@@ -5,22 +5,21 @@ T038: TripRequest 검증 → plan 서비스 호출 → Plan 응답 반환.
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Header
-from uuid import UUID
 from datetime import datetime
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from app.schemas.journeys import (
-    TripRequest,
-    Plan,
-    ReplanRequest,
-    ReplanResponse,
-)
-from app.schemas.errors import ErrorCode
+from fastapi import APIRouter, Header
+
+from app.api.responses import error_response, success_response
 from app.schemas.common import Envelope, Meta
+from app.schemas.errors import ErrorCode
+from app.schemas.journeys import (
+    ReplanRequest,
+    TripRequest,
+)
 from app.services.mock.mock_providers import MockRoutingProvider
 from app.services.plan_service import PlanService
-from app.api.responses import success_response, error_response
 
 logger = logging.getLogger(__name__)
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -107,10 +106,10 @@ async def journeys_plan(
         )
 
     try:
-                # Idempotency-Key 검증
+        # Idempotency-Key 검증
         ikey = validate_idempotency_key(idempotency_key)
 
-# Plan 서비스 호출
+        # Plan 서비스 호출
         plan_result = await plan_service.plan(
             request=request_body,
             buffer_minutes=5,
@@ -142,11 +141,10 @@ async def journeys_plan(
         )
 
 
-
-
 # ─────────────────────────────────────────────
 # 막차 귀가 계획 (User Story 2 - T048)
 # ─────────────────────────────────────────────
+
 
 @router.post("/journeys/plan/last_journey", response_model=Envelope, status_code=200)
 async def journeys_plan_last_journey(
@@ -212,9 +210,9 @@ async def journeys_plan_last_journey(
         )
 
     from app.services.last_journey_service import (
+        LastJourneyService,
         LastJourneyUnsupportedError,
         NoFeasibleJourneyError,
-        LastJourneyService,
     )
     from app.services.mock.mock_providers import MockRoutingProvider
 
@@ -358,9 +356,9 @@ async def journeys_replan(
         )
 
     try:
-        from app.services.replan_service import ReplanService
-        from app.services.plan_service import PlanService
         from app.services.mock.mock_providers import MockRoutingProvider
+        from app.services.plan_service import PlanService
+        from app.services.replan_service import ReplanService
 
         # Idempotency-Key 검증
         ikey = validate_idempotency_key(idempotency_key)

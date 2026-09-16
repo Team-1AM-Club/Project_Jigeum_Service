@@ -2,6 +2,7 @@
 
 SQLAlchemy 모델과 공유 Base를 export.
 """
+
 from app.models.conversation import Base, Conversation
 from app.models.plan import Plan
 

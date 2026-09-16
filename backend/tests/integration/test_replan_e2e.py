@@ -7,21 +7,10 @@
 - envelope 응답 구조 검증
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 import uuid
+from zoneinfo import ZoneInfo
 
-from app.schemas.journeys import (
-    ReplanRequest,
-    ReplanResponse,
-    ReplanReason,
-)
 from app.schemas.errors import ErrorCode
-from app.schemas.common import Envelope
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
-from app.schemas.journeys import Plan
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -56,7 +45,9 @@ class TestReplanE2EWithActualMock:
         )
 
         # 상태 코드 검증
-        assert response.status_code == 200, f"예상 200, 실제 {response.status_code}: {response.text}"
+        assert response.status_code == 200, (
+            f"예상 200, 실제 {response.status_code}: {response.text}"
+        )
 
         body = response.json()
         assert body["status"] == "ok"
@@ -143,10 +134,16 @@ class TestReplanE2EWithActualMock:
         comparison = response.json()["data"]["comparison"]
 
         # arrival_change_minutes는 정수 또는 None
-        assert isinstance(comparison["arrival_change_minutes"], int) or                comparison["arrival_change_minutes"] is None
+        assert (
+            isinstance(comparison["arrival_change_minutes"], int)
+            or comparison["arrival_change_minutes"] is None
+        )
 
         # leave_change_minutes도 정수 또는 None
-        assert isinstance(comparison["leave_change_minutes"], int) or                comparison["leave_change_minutes"] is None
+        assert (
+            isinstance(comparison["leave_change_minutes"], int)
+            or comparison["leave_change_minutes"] is None
+        )
 
     def test_e2e_replan_user_confirmed_required(self, client):
         """user_confirmed=false → 422 USER_CONFIRMATION_REQUIRED."""
@@ -192,7 +189,10 @@ class TestReplanE2EWithActualMock:
         assert response.status_code == 422
         body = response.json()
         assert body["status"] == "error"
-        assert "origin" in body["error"]["message"].lower() or                "trip" in body["error"]["message"].lower()
+        assert (
+            "origin" in body["error"]["message"].lower()
+            or "trip" in body["error"]["message"].lower()
+        )
 
     def test_e2e_replan_missing_trip_destination(self, client):
         """trip.destination_place_id 누락 → 422."""
@@ -215,7 +215,10 @@ class TestReplanE2EWithActualMock:
         assert response.status_code == 422
         body = response.json()
         assert body["status"] == "error"
-        assert "destination" in body["error"]["message"].lower() or                "trip" in body["error"]["message"].lower()
+        assert (
+            "destination" in body["error"]["message"].lower()
+            or "trip" in body["error"]["message"].lower()
+        )
 
     def test_e2e_replan_all_reason_types(self, client):
         """모든 재탐색 사유 타입으로 요청 가능."""
@@ -237,7 +240,9 @@ class TestReplanE2EWithActualMock:
             )
 
             # user_confirmed=true 이므로 유효한 요청 → 200
-            assert response.status_code == 200, f"reason={reason}: 예상 200, 실제 {response.status_code}"
+            assert response.status_code == 200, (
+                f"reason={reason}: 예상 200, 실제 {response.status_code}"
+            )
 
     def test_e2e_replan_no_previous_plan(self, client):
         """이전 계획 없이 재탐색 가능."""
@@ -292,7 +297,10 @@ class TestReplanE2EWithActualMock:
         data = response.json()["data"]
 
         # 새로운 출발지로 재탐색됨
-        assert data["comparison"]["new_plan"]["origin_place_id"] == "place_jongro3ga_station"
+        assert (
+            data["comparison"]["new_plan"]["origin_place_id"]
+            == "place_jongro3ga_station"
+        )
 
     def test_e2e_replan_envelope_on_error(self, client):
         """오류 응답도 공통 envelope 구조."""
@@ -323,7 +331,9 @@ class TestReplanE2EWithActualMock:
         # details는 API 계약에 따라 배열 (Idempotency-Key는 헤더이므로 details에 field 정보 없을 수 있음)
         assert isinstance(body["error"].get("details"), list)
         # data/meta 검증 (오류 응답)
-        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("data") is None, (
+            f"error 응답에서 data는 null: {body.get('data')}"
+        )
         assert body.get("meta") is not None, "error 응답에도 meta는 포함"
 
     def test_e2e_replan_idempotency_key_validation(self, client):
@@ -347,7 +357,7 @@ class TestReplanE2EWithActualMock:
 
         assert response.status_code == 422
         body = response.json()
-        
+
         # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
         assert body["status"] == "error"
         assert body["error"]["code"] == "VALIDATION_ERROR"
@@ -355,7 +365,9 @@ class TestReplanE2EWithActualMock:
         # details는 API 계약에 따라 배열 (Idempotency-Key는 헤더이므로 details에 field 정보 없을 수 있음)
         assert isinstance(body["error"].get("details"), list)
         # data/meta 검증 (오류 응답)
-        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("data") is None, (
+            f"error 응답에서 data는 null: {body.get('data')}"
+        )
         assert body.get("meta") is not None, "error 응답에도 meta는 포함"
 
     def test_e2e_replan_auto_replacement_prevented(self, client):

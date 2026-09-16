@@ -6,20 +6,10 @@
 - arrival_change_minutes 계산 검증
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 import uuid
+from zoneinfo import ZoneInfo
 
 from app.schemas.errors import ErrorCode
-from app.schemas.journeys import (
-    ReplanRequest,
-    ReplanResponse,
-    ReplanComparison,
-    ReplanReason,
-)
-from app.schemas.common import Envelope
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -59,7 +49,9 @@ class TestReplanContract:
         )
 
         # 상태 코드 검증
-        assert response.status_code == 200, f"예상 200, 실제 {response.status_code}: {response.text}"
+        assert response.status_code == 200, (
+            f"예상 200, 실제 {response.status_code}: {response.text}"
+        )
 
         body = response.json()
         assert body.get("status") == "ok", f"status=ok 기대, 실제={body.get('status')}"
@@ -81,23 +73,37 @@ class TestReplanContract:
         # comparison 구조 검증
         comparison = data["comparison"]
         assert "new_plan" in comparison, "comparison.new_plan 누락"
-        assert "arrival_change_minutes" in comparison, "comparison.arrival_change_minutes 누락"
-        assert "leave_change_minutes" in comparison, "comparison.leave_change_minutes 누락"
-        assert "previous_plan_preserved" in comparison, "comparison.previous_plan_preserved 누락"
-        assert "previous_plan_valid" in comparison, "comparison.previous_plan_valid 누락"
+        assert "arrival_change_minutes" in comparison, (
+            "comparison.arrival_change_minutes 누락"
+        )
+        assert "leave_change_minutes" in comparison, (
+            "comparison.leave_change_minutes 누락"
+        )
+        assert "previous_plan_preserved" in comparison, (
+            "comparison.previous_plan_preserved 누락"
+        )
+        assert "previous_plan_valid" in comparison, (
+            "comparison.previous_plan_valid 누락"
+        )
 
         # previous_plan_preserved = True (이전 선택 삭제되지 않음)
-        assert comparison["previous_plan_preserved"] is True, "이전 선택이 보존되어야 함"
+        assert comparison["previous_plan_preserved"] is True, (
+            "이전 선택이 보존되어야 함"
+        )
 
         # previous_plan_valid = False (보장되지 않음)
-        assert comparison["previous_plan_valid"] is False, "이전 경로 유효성은 보장되지 않음"
+        assert comparison["previous_plan_valid"] is False, (
+            "이전 경로 유효성은 보장되지 않음"
+        )
 
         # new_plan 구조 검증 (Plan 구조)
         new_plan = comparison["new_plan"]
         assert "plan_id" in new_plan, "new_plan.plan_id 누락"
         assert "target_arrival_at" in new_plan, "new_plan.target_arrival_at 누락"
         assert "recommended_leave_at" in new_plan, "new_plan.recommended_leave_at 누락"
-        assert "total_duration_minutes" in new_plan, "new_plan.total_duration_minutes 누락"
+        assert "total_duration_minutes" in new_plan, (
+            "new_plan.total_duration_minutes 누락"
+        )
 
         # meta 검증
         meta = body["meta"]
@@ -139,10 +145,16 @@ class TestReplanContract:
         comparison = data["comparison"]
 
         # arrival_change_minutes는 숫자
-        assert isinstance(comparison["arrival_change_minutes"], int) or                comparison["arrival_change_minutes"] is None
+        assert (
+            isinstance(comparison["arrival_change_minutes"], int)
+            or comparison["arrival_change_minutes"] is None
+        )
 
         # leave_change_minutes도 숫자 또는 None
-        assert isinstance(comparison["leave_change_minutes"], int) or                comparison["leave_change_minutes"] is None
+        assert (
+            isinstance(comparison["leave_change_minutes"], int)
+            or comparison["leave_change_minutes"] is None
+        )
 
     def test_replan_previous_plan_preserved(self, client):
         """이전 선택 보존 검증.
@@ -238,7 +250,9 @@ class TestReplanContract:
             # 유효한 reason + user_confirmed=true → 200 OK 또는 재탐색 성공/실패 응답
             # (Mock 환경에 따라 200 또는 422일 수 있음 - 핵심은 enum 수용 여부)
             # reason enum이 유효하면 Pydantic 검증 통과, 이후 서비스 결과에 따름
-            assert response.status_code in [200, 422], f"reason={reason}: 예상치 못한 상태 {response.status_code}"
+            assert response.status_code in [200, 422], (
+                f"reason={reason}: 예상치 못한 상태 {response.status_code}"
+            )
 
     def test_replan_missing_trip_returns_422(self, client):
         """trip 정보 누락 → 422 VALIDATION_ERROR.
@@ -262,14 +276,17 @@ class TestReplanContract:
 
         assert response.status_code == 422
         body = response.json()
-        
+
         # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
         assert body["status"] == "error"
         assert body["error"]["code"] == "VALIDATION_ERROR"
         # details에서 field 정보 확인
         details = body["error"].get("details", [])
-        assert any("trip" in d.get("field", "").lower() or "origin" in d.get("field", "").lower()
-                  for d in details), f"details에 trip/origin 관련 오류 포함 기대: {details}"
+        assert any(
+            "trip" in d.get("field", "").lower()
+            or "origin" in d.get("field", "").lower()
+            for d in details
+        ), f"details에 trip/origin 관련 오류 포함 기대: {details}"
 
     def test_replan_missing_origin_in_trip_returns_422(self, client):
         """trip.origin_place_id 누락 → 422.
@@ -348,7 +365,7 @@ class TestReplanContract:
 
         assert response.status_code == 422
         body = response.json()
-        
+
         # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
         assert body["status"] == "error"
         assert body["error"]["code"] == "VALIDATION_ERROR"
@@ -356,8 +373,12 @@ class TestReplanContract:
         # details는 API 계약에 따라 배열 (Idempotency-Key는 헤더이므로 details에 field 정보 없을 수 있음)
         assert isinstance(body["error"].get("details"), list)
         # data/meta 검증 (오류 응답)
-        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("data") is None, (
+            f"error 응답에서 data는 null: {body.get('data')}"
+        )
         assert body.get("meta") is not None, "error 응답에도 meta는 포함"
         # data/meta 검증 (오류 응답)
-        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("data") is None, (
+            f"error 응답에서 data는 null: {body.get('data')}"
+        )
         assert body.get("meta") is not None, "error 응답에도 meta는 포함"

@@ -5,39 +5,38 @@
 - Idempotency-Key 동일/다른 요청 처리
 - revision 충돌 처리
 """
-import pytest
+
 import uuid
-import json
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.idempotency import IdempotencyRecord
 from app.services.conversation_service import (
-    create_conversation,
-    get_conversation,
-    update_conversation,
-    expire_conversation,
-    hard_delete_conversation,
-    check_and_handle_expiry,
     candidate_set_expired,
+    check_and_handle_expiry,
+    create_conversation,
+    expire_conversation,
+    get_conversation,
+    hard_delete_conversation,
     hard_delete_if_eligible,
-    mark_conditions_confirmed,
     mark_candidate_set_ready,
+    mark_conditions_confirmed,
     mark_plan_selected,
+    update_conversation,
 )
 from app.services.idempotency_service import (
-    compute_payload_hash,
-    save_idempotency_record,
-    get_idempotency_record,
     check_idempotency_conflict,
     check_idempotency_hit,
+    compute_payload_hash,
+    get_idempotency_record,
+    save_idempotency_record,
     validate_idempotency_key_format,
 )
-from app.schemas.errors import ErrorCode
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -45,6 +44,7 @@ SEOUL_TZ = ZoneInfo("Asia/Seoul")
 # ─────────────────────────────────────────────
 # Fixture: in-memory SQLite DB
 # ─────────────────────────────────────────────
+
 
 @pytest.fixture
 def db_session():
@@ -55,6 +55,7 @@ def db_session():
     # Plan 테이블은 필요시 생성 (CASCADE 삭제 테스트용)
     try:
         from app.models.plan import Plan as PlanModel
+
         PlanModel.__table__.create(engine)
     except Exception:
         pass
@@ -72,6 +73,7 @@ def db_session():
 # T067: 대화 생성 테스트
 # ─────────────────────────────────────────────
 
+
 class TestConversationCreation:
     """대화 생성 계약 테스트."""
 
@@ -82,9 +84,10 @@ class TestConversationCreation:
         assert len(conv.conversation_id) == 36
         # UUID v4 패턴 검증
         import re
+
         uuid_v4_pattern = re.compile(
-            r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-            re.IGNORECASE
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            re.IGNORECASE,
         )
         assert uuid_v4_pattern.match(conv.conversation_id)
 
@@ -102,7 +105,7 @@ class TestConversationCreation:
         """expires_at = 생성 시각 + 24시간 (기본)."""
         conv = create_conversation(db=db_session)
         assert conv.expires_at is not None
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected = now + timedelta(days=1)
         # 1분 오차 허용
         assert abs((conv.expires_at - expected).total_seconds()) < 60
@@ -117,7 +120,10 @@ class TestConversationCreation:
         """confirmed_conditions 초기값 설정 가능."""
         conv = create_conversation(
             db=db_session,
-            confirmed_conditions={"places_confirmed": True, "conditions_confirmed": True},
+            confirmed_conditions={
+                "places_confirmed": True,
+                "conditions_confirmed": True,
+            },
         )
         assert conv.confirmed_conditions["places_confirmed"] is True
 
@@ -125,6 +131,7 @@ class TestConversationCreation:
 # ─────────────────────────────────────────────
 # T067: 대화 갱신 (revision 증가) 테스트
 # ─────────────────────────────────────────────
+
 
 class TestConversationUpdate:
     """대화 갱신 (revision 증가) 계약 테스트."""
@@ -196,6 +203,7 @@ class TestConversationUpdate:
 # T067: 상태 전이 테스트
 # ─────────────────────────────────────────────
 
+
 class TestConversationStateTransitions:
     """대화 상태 전이 계약 테스트."""
 
@@ -218,7 +226,10 @@ class TestConversationStateTransitions:
             db=db_session,
             conversation_id=conv.conversation_id,
             expected_revision=1,
-            candidate_set={"options": [{"id": "opt1"}], "expires_at": "2026-09-17T00:00:00+09:00"},
+            candidate_set={
+                "options": [{"id": "opt1"}],
+                "expires_at": "2026-09-17T00:00:00+09:00",
+            },
         )
         assert updated.candidate_set["options"][0]["id"] == "opt1"
         assert updated.revision == 2
@@ -240,33 +251,42 @@ class TestConversationStateTransitions:
 # T067: 만료·tombstone·hard delete 테스트
 # ─────────────────────────────────────────────
 
+
 class TestConversationExpiry:
     """만료·tombstone·hard delete 계약 테스트."""
 
     def test_expire_conversation_basic(self, db_session):
         """만료 → tombstone 전환."""
         conv = create_conversation(db=db_session)
-        expired = expire_conversation(db=db_session, conversation_id=conv.conversation_id)
+        expired = expire_conversation(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert expired.status == ConversationStatus.TOMBSTONE
 
     def test_expire_conversation_idempotent(self, db_session):
         """이미 tombstone → 멱등 처리."""
         conv = create_conversation(db=db_session)
         expire_conversation(db=db_session, conversation_id=conv.conversation_id)
-        expired2 = expire_conversation(db=db_session, conversation_id=conv.conversation_id)
+        expired2 = expire_conversation(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert expired2.status == ConversationStatus.TOMBSTONE
 
     def test_check_and_handle_expiry_active(self, db_session):
         """active conversation → was_expired=False."""
         conv = create_conversation(db=db_session)
-        result, was_expired = check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
+        result, was_expired = check_and_handle_expiry(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert was_expired is False
         assert result.status == ConversationStatus.ACTIVE
 
     def test_check_and_handle_expiry_expired(self, db_session):
         """expires_at <= now → tombstone 전환."""
         conv = create_conversation(db=db_session, expires_in_minutes=0)  # 즉시 만료
-        result, was_expired = check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
+        result, was_expired = check_and_handle_expiry(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert was_expired is True
         assert result.status == ConversationStatus.TOMBSTONE
         # payload 제거 확인
@@ -278,7 +298,9 @@ class TestConversationExpiry:
         """이미 tombstone → 멱등."""
         conv = create_conversation(db=db_session, expires_in_minutes=0)
         check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
-        result, was_expired = check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
+        result, was_expired = check_and_handle_expiry(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert was_expired is True
         assert result.status == ConversationStatus.TOMBSTONE
 
@@ -286,17 +308,23 @@ class TestConversationExpiry:
         """active 상태에서 hard delete 시도 → ValueError."""
         conv = create_conversation(db=db_session)
         with pytest.raises(ValueError, match="tombstone"):
-            hard_delete_conversation(db=db_session, conversation_id=conv.conversation_id)
+            hard_delete_conversation(
+                db=db_session, conversation_id=conv.conversation_id
+            )
 
     def test_hard_delete_tombstone(self, db_session):
         """tombstone → hard delete 가능."""
         conv = create_conversation(db=db_session, expires_in_minutes=0)
         check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
-        result = hard_delete_conversation(db=db_session, conversation_id=conv.conversation_id)
+        result = hard_delete_conversation(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert result is True
 
         # 삭제 후 조회 → None
-        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id, include_expired=True)
+        retrieved = get_conversation(
+            db=db_session, conversation_id=conv.conversation_id, include_expired=True
+        )
         assert retrieved is None
 
     def test_hard_delete_not_found(self, db_session):
@@ -307,7 +335,9 @@ class TestConversationExpiry:
     def test_hard_delete_if_eligible_active(self, db_session):
         """active → hard_delete_if_eligible → False."""
         conv = create_conversation(db=db_session)
-        result = hard_delete_if_eligible(db=db_session, conversation_id=conv.conversation_id)
+        result = hard_delete_if_eligible(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert result is False
 
     def test_hard_delete_if_eligible_tombstone_not_elapsed(self, db_session):
@@ -315,13 +345,16 @@ class TestConversationExpiry:
         conv = create_conversation(db=db_session, expires_in_minutes=0)
         check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
         # tombstone 전환 후 updated_at이 지금이므로 24시간 미경과
-        result = hard_delete_if_eligible(db=db_session, conversation_id=conv.conversation_id)
+        result = hard_delete_if_eligible(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert result is False
 
 
 # ─────────────────────────────────────────────
 # T067: Idempotency-Key 계약 테스트
 # ─────────────────────────────────────────────
+
 
 class TestIdempotencyKey:
     """Idempotency-Key 계약 테스트."""
@@ -387,6 +420,7 @@ class TestIdempotencyKey:
     def test_validate_idempotency_key_format_uuid_v1(self, db_session):
         """UUID v1 → ValueError."""
         import uuid as uuid_mod
+
         key = str(uuid_mod.uuid1())
         with pytest.raises(ValueError):
             validate_idempotency_key_format(key)
@@ -409,7 +443,11 @@ class TestIdempotencyKey:
         assert record.payload_hash
         assert len(record.payload_hash) == 64
 
-        retrieved = get_idempotency_record(db=db_session, conversation_id=conv.conversation_id, idempotency_key=record.idempotency_key)
+        retrieved = get_idempotency_record(
+            db=db_session,
+            conversation_id=conv.conversation_id,
+            idempotency_key=record.idempotency_key,
+        )
         assert retrieved
         assert retrieved.payload_hash == record.payload_hash
 
@@ -489,6 +527,7 @@ class TestIdempotencyKey:
         """conversation_id + idempotency_key 중복 → IntegrityError."""
         conv = create_conversation(db=db_session)
         from sqlalchemy.exc import IntegrityError
+
         key = str(uuid.uuid4())
         save_idempotency_record(
             db=db_session,
@@ -520,6 +559,7 @@ class TestIdempotencyKey:
 # T067: Candidate set 만료 테스트
 # ─────────────────────────────────────────────
 
+
 class TestCandidateSetExpiry:
     """후보 집합 만료 계약 테스트."""
 
@@ -535,7 +575,10 @@ class TestCandidateSetExpiry:
                 "expires_at": "2020-01-01T00:00:00+09:00",  # 과거
             },
         )
-        assert candidate_set_expired(db=db_session, conversation_id=conv.conversation_id) is True
+        assert (
+            candidate_set_expired(db=db_session, conversation_id=conv.conversation_id)
+            is True
+        )
 
     def test_candidate_set_expired_false(self, db_session):
         """candidate_set expires_at 미래 → False."""
@@ -549,9 +592,15 @@ class TestCandidateSetExpiry:
                 "expires_at": "2099-01-01T00:00:00+09:00",  # 미래
             },
         )
-        assert candidate_set_expired(db=db_session, conversation_id=conv.conversation_id) is False
+        assert (
+            candidate_set_expired(db=db_session, conversation_id=conv.conversation_id)
+            is False
+        )
 
     def test_candidate_set_expired_no_candidate_set(self, db_session):
         """candidate_set 없음 → False."""
         conv = create_conversation(db=db_session)
-        assert candidate_set_expired(db=db_session, conversation_id=conv.conversation_id) is False
+        assert (
+            candidate_set_expired(db=db_session, conversation_id=conv.conversation_id)
+            is False
+        )

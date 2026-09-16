@@ -5,15 +5,13 @@
 - 출발지 미확정 → 422 VALIDATION_ERROR 검증
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 import uuid
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.schemas.errors import ErrorCode
-from app.schemas.journeys import TripRequest, Plan
-from app.schemas.common import Envelope
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -46,7 +44,9 @@ class TestJourneysPlanContract:
         )
 
         # 상태 코드 검증
-        assert response.status_code == 200, f"예상 200, 실제 {response.status_code}: {response.text}"
+        assert response.status_code == 200, (
+            f"예상 200, 실제 {response.status_code}: {response.text}"
+        )
 
         # Envelope 구조 검증
         body = response.json()
@@ -74,21 +74,29 @@ class TestJourneysPlanContract:
         arrival_deadline = datetime.fromisoformat("2026-09-16T19:00:00+09:00")
         expected_target = arrival_deadline - timedelta(minutes=10)  # preference=10
         actual_target = datetime.fromisoformat(data["target_arrival_at"])
-        assert actual_target == expected_target,             f"target_arrival_at 불일치: 기대={expected_target}, 실제={actual_target}"
+        assert actual_target == expected_target, (
+            f"target_arrival_at 불일치: 기대={expected_target}, 실제={actual_target}"
+        )
 
         # recommended_leave_at = target - total_duration - buffer
         # Mock: total_duration=42, buffer=5 → 18:50 - 42 - 5 = 18:03
         expected_leave = expected_target - timedelta(minutes=42 + 5)
         actual_leave = datetime.fromisoformat(data["recommended_leave_at"])
-        assert actual_leave == expected_leave,             f"recommended_leave_at 불일치: 기대={expected_leave}, 실제={actual_leave}"
+        assert actual_leave == expected_leave, (
+            f"recommended_leave_at 불일치: 기대={expected_leave}, 실제={actual_leave}"
+        )
 
         # recommended_leave_at < target_arrival_at
-        assert actual_leave < actual_target, "recommended_leave_at이 target_arrival_at보다 이후"
+        assert actual_leave < actual_target, (
+            "recommended_leave_at이 target_arrival_at보다 이후"
+        )
 
         # comparison 구조 검증
         comparison = data["comparison"]
         assert "options" in comparison, "comparison.options 누락"
-        assert isinstance(comparison["options"], list), "comparison.options가 리스트 아님"
+        assert isinstance(comparison["options"], list), (
+            "comparison.options가 리스트 아님"
+        )
         assert len(comparison["options"]) >= 1, "후보 경로가 1개 이상 필요"
 
         for opt in comparison["options"]:
@@ -100,7 +108,9 @@ class TestJourneysPlanContract:
 
         # meta 검증
         meta = body["meta"]
-        assert meta.get("api_version") == "v1", f"api_version=v1 기대, 실제={meta.get('api_version')}"
+        assert meta.get("api_version") == "v1", (
+            f"api_version=v1 기대, 실제={meta.get('api_version')}"
+        )
         assert meta.get("is_demo") is True, "is_demo=True 기대"
 
     def test_plan_missing_origin_returns_422(self, client):
@@ -125,21 +135,27 @@ class TestJourneysPlanContract:
         )
 
         # 422 응답 검증
-        assert response.status_code == 422, f"예상 422, 실제 {response.status_code}: {response.text}"
+        assert response.status_code == 422, (
+            f"예상 422, 실제 {response.status_code}: {response.text}"
+        )
 
         body = response.json()
-        
+
         # Envelope 형식일 수도 있고, FastAPI 기본 형식일 수도 있음
         if body.get("status") == "error":
             # 우리 envelope 형식
             assert "error" in body, "error 필드 누락"
             error = body["error"]
-            assert error.get("code") == ErrorCode.VALIDATION_ERROR.value,                 f"오류 코드 VALIDATION_ERROR 기대, 실제={error.get('code')}"
+            assert error.get("code") == ErrorCode.VALIDATION_ERROR.value, (
+                f"오류 코드 VALIDATION_ERROR 기대, 실제={error.get('code')}"
+            )
         elif "detail" in body:
             # FastAPI 기본 ValidationError 형식
             detail = body["detail"]
             assert isinstance(detail, list), "detail이 리스트여야 함"
-            assert any("origin_place_id" in str(d.get("loc", [])) for d in detail),                 "origin_place_id 검증 오류 필요"
+            assert any("origin_place_id" in str(d.get("loc", [])) for d in detail), (
+                "origin_place_id 검증 오류 필요"
+            )
         else:
             pytest.fail(f"예상치 못한 422 응답 형식: {body}")
 
@@ -195,7 +211,9 @@ class TestJourneysPlanContract:
             assert field in body, f"Envelope 필드 '{field}' 누락"
 
         # status 값 검증
-        assert body["status"] in ("ok", "error"), f"유효하지 않은 status: {body['status']}"
+        assert body["status"] in ("ok", "error"), (
+            f"유효하지 않은 status: {body['status']}"
+        )
 
         # 성공 응답일 때 data ≠ null, error = null
         if body["status"] == "ok":
@@ -238,10 +256,14 @@ class TestJourneysPlanContract:
         # buffer는 recommended_leave_at 계산 시에만 적용 (target에는 미적용)
         actual_target = datetime.fromisoformat(data["target_arrival_at"])
         expected_target = arrival_deadline - timedelta(minutes=10)
-        assert actual_target == expected_target,             f"target_arrival_at 불일치: 기대={expected_target}, 실제={actual_target}"
+        assert actual_target == expected_target, (
+            f"target_arrival_at 불일치: 기대={expected_target}, 실제={actual_target}"
+        )
 
         # recommended_leave_at = target - total_duration - buffer
         # Mock: total=42, buffer=5 → 18:50 - 47 = 18:03
         actual_leave = datetime.fromisoformat(data["recommended_leave_at"])
         expected_leave = expected_target - timedelta(minutes=42 + 5)
-        assert actual_leave == expected_leave,             f"recommended_leave_at 불일치: 기대={expected_leave}, 실제={actual_leave}"
+        assert actual_leave == expected_leave, (
+            f"recommended_leave_at 불일치: 기대={expected_leave}, 실제={actual_leave}"
+        )

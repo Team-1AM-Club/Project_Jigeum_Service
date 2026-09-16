@@ -4,27 +4,24 @@ ReplanService의 계약: 입력 조건 → 출력 계약 검증.
 Mock PlanService 사용. 재탐색 응답 구조와 오류 거동을 확인한다.
 """
 
-import asyncio
-import pytest
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.schemas.journeys import (
-    ReplanRequest,
-    ReplanResponse,
-    ReplanComparison,
-    TripRequest,
+    Comparison,
     Plan,
     PlanSummary,
-    Comparison,
+    ReplanComparison,
     ReplanReason,
+    ReplanRequest,
+    ReplanResponse,
 )
-from app.schemas.errors import ErrorCode
-from app.services.replan_service import ReplanService
 from app.services.plan_service import PlanService
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
-
+from app.services.provider_interfaces import ProviderResult, RoutingProvider
+from app.services.replan_service import ReplanService
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -61,53 +58,57 @@ def _make_replan_request(
 
 def _make_mock_plan_service() -> PlanService:
     ps = MagicMock(spec=PlanService)
-    ps.plan = AsyncMock(return_value=Plan(
-        plan_id="plan_replan_001",
-        conversation_id="conv_test_001",
-        origin_place_id="홍대입구역",
-        destination_place_id="서울대학교입구",
-        target_arrival_at=_now() + timedelta(hours=1, minutes=55),
-        recommended_leave_at=_now() + timedelta(minutes=5),
-        total_duration_minutes=75,
-        buffer_applied=5,
-        notes="재탐색용 모의 계획",
-        comparison=Comparison(
-            options=[
-                PlanSummary(
-                    option_id="opt_1",
-                    recommended_leave_at=_now() + timedelta(minutes=5),
-                    target_arrival_at=_now() + timedelta(hours=1, minutes=55),
-                    total_duration_minutes=75,
-                    transport_mode="subway",
-                    reasoning="지하철 2호선 직행",
-                )
-            ],
-            selected_option_id="opt_1",
-            comparison_reason="환승이 적은 직행 경로를 우선 권장",
-        ),
-    ))
+    ps.plan = AsyncMock(
+        return_value=Plan(
+            plan_id="plan_replan_001",
+            conversation_id="conv_test_001",
+            origin_place_id="홍대입구역",
+            destination_place_id="서울대학교입구",
+            target_arrival_at=_now() + timedelta(hours=1, minutes=55),
+            recommended_leave_at=_now() + timedelta(minutes=5),
+            total_duration_minutes=75,
+            buffer_applied=5,
+            notes="재탐색용 모의 계획",
+            comparison=Comparison(
+                options=[
+                    PlanSummary(
+                        option_id="opt_1",
+                        recommended_leave_at=_now() + timedelta(minutes=5),
+                        target_arrival_at=_now() + timedelta(hours=1, minutes=55),
+                        total_duration_minutes=75,
+                        transport_mode="subway",
+                        reasoning="지하철 2호선 직행",
+                    )
+                ],
+                selected_option_id="opt_1",
+                comparison_reason="환승이 적은 직행 경로를 우선 권장",
+            ),
+        )
+    )
     return ps
 
 
 def _make_mock_routing_provider() -> RoutingProvider:
     rp = MagicMock(spec=RoutingProvider)
-    rp.route_options = AsyncMock(return_value=ProviderResult(
-        ok=True,
-        data=[
-            {
-                "option_id": "opt_1",
-                "origin_place_id": "홍대입구역",
-                "destination_place_id": "서울대학교입구",
-                "departure_at": (_now() + timedelta(minutes=5)).isoformat(),
-                "arrival_at": (_now() + timedelta(hours=1, minutes=55)).isoformat(),
-                "transport_mode": "subway",
-                "line_name": "2호선",
-                "duration_minutes": 70,
-                "distance_km": 15.0,
-                "instructions": "홍대입구역에서 2호선 승차, 서울대입구역 하차",
-            }
-        ],
-    ))
+    rp.route_options = AsyncMock(
+        return_value=ProviderResult(
+            ok=True,
+            data=[
+                {
+                    "option_id": "opt_1",
+                    "origin_place_id": "홍대입구역",
+                    "destination_place_id": "서울대학교입구",
+                    "departure_at": (_now() + timedelta(minutes=5)).isoformat(),
+                    "arrival_at": (_now() + timedelta(hours=1, minutes=55)).isoformat(),
+                    "transport_mode": "subway",
+                    "line_name": "2호선",
+                    "duration_minutes": 70,
+                    "distance_km": 15.0,
+                    "instructions": "홍대입구역에서 2호선 승차, 서울대입구역 하차",
+                }
+            ],
+        )
+    )
     return rp
 
 
@@ -198,6 +199,7 @@ class TestReplanServiceContract:
         response = await replan_service.replan(request)
         plan = response.comparison.new_plan
         from app.services.time_calculation import ensure_seoul
+
         leave_dt = ensure_seoul(plan.recommended_leave_at)
         assert leave_dt.tzinfo is not None
         assert leave_dt.tzinfo.key == "Asia/Seoul"

@@ -1,9 +1,11 @@
+from typing import Any
+
 from fastapi.responses import JSONResponse
+
 from app.schemas.common import Envelope, Meta
-from typing import Any, Optional
 
 
-def success_response(data: Any = None, meta: Optional[Meta] = None) -> Envelope:
+def success_response(data: Any = None, meta: Meta | None = None) -> Envelope:
     """성공 응답 봉투 생성."""
     if meta is None:
         meta = Meta()
@@ -14,7 +16,7 @@ def error_response(
     error_code: str,
     message: str,
     status_code: int,
-    details: Optional[Any] = None,
+    details: Any | None = None,
 ) -> JSONResponse:
     """오류 응답 봉투 생성 (JSONResponse로 proper HTTP status code 반환)."""
     # details가 None이면 빈 리스트로 기본값 설정 (API_SPEC.md에서 details는 배열)

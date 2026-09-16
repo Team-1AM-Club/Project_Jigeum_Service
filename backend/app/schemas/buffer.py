@@ -2,22 +2,24 @@
 
 target_arrival_at, recommended_leave_at, total_duration_minutes, legs, buffer 필드 포함.
 """
-from pydantic import BaseModel, Field
-from typing import Optional, List
+
 from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 class Leg(BaseModel):
     """경로 다리(leg) 스키마."""
+
     mode: str
-    departure_at: Optional[datetime] = None
-    arrival_at: Optional[datetime] = None
-    origin_place_id: Optional[str] = None
-    destination_place_id: Optional[str] = None
-    route_id: Optional[str] = None
+    departure_at: datetime | None = None
+    arrival_at: datetime | None = None
+    origin_place_id: str | None = None
+    destination_place_id: str | None = None
+    route_id: str | None = None
     leg_index: int = 0
-    duration_minutes: Optional[int] = None
-    distance_meters: Optional[int] = None
+    duration_minutes: int | None = None
+    distance_meters: int | None = None
 
 
 class BufferPlan(BaseModel):
@@ -29,19 +31,28 @@ class BufferPlan(BaseModel):
     legs: 경로 상세 다리 목록
     buffer: 적용된 완충 시간 (분)
     """
-    plan_id: Optional[str] = None
-    conversation_id: Optional[str] = None
-    selected_option_id: Optional[str] = None
+
+    plan_id: str | None = None
+    conversation_id: str | None = None
+    selected_option_id: str | None = None
     origin_place_id: str
     destination_place_id: str
-    target_arrival_at: Optional[datetime] = Field(None, description="목표 도착 시각 (arrival_deadline 기준)")
-    recommended_leave_at: Optional[datetime] = Field(None, description="권장 출발 시각 (total_duration + buffer 반영)")
-    total_duration_minutes: Optional[int] = Field(None, ge=0, description="총 소요 시간 (분)")
-    legs: List[Leg] = Field(default_factory=list, description="경로 다리 목록")
+    target_arrival_at: datetime | None = Field(
+        None, description="목표 도착 시각 (arrival_deadline 기준)"
+    )
+    recommended_leave_at: datetime | None = Field(
+        None, description="권장 출발 시각 (total_duration + buffer 반영)"
+    )
+    total_duration_minutes: int | None = Field(
+        None, ge=0, description="총 소요 시간 (분)"
+    )
+    legs: list[Leg] = Field(default_factory=list, description="경로 다리 목록")
     buffer: int = Field(5, ge=0, le=30, description="완충 시간 (분)")
-    transport_mode: Optional[str] = Field(None, pattern="^(subway|bus|walking|taxi|bicycle)$")
+    transport_mode: str | None = Field(
+        None, pattern="^(subway|bus|walking|taxi|bicycle)$"
+    )
     confidence: float = Field(1.0, ge=0.0, le=1.0)
-    notes: Optional[str] = None
+    notes: str | None = None
 
     class Config:
         json_schema_extra = {
@@ -79,6 +90,7 @@ class BufferPlan(BaseModel):
 
 class BufferPolicy(BaseModel):
     """완충 정책 스키마."""
+
     default_buffer_minutes: int = Field(5, ge=0, le=30)
     max_buffer_minutes: int = Field(30, ge=0, le=60)
     apply_buffer: bool = True

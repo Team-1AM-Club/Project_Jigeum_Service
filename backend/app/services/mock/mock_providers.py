@@ -3,15 +3,16 @@
 실제 데이터 의존 없이 고정/hardcoded 응답을 반환한다.
 Phase 1 MVP에서 제공자 의존성을 분리하기 위한 테스트 더블.
 """
-from typing import Any, List, Optional
+
 from app.schemas.places import PlaceResult
 from app.services.provider_interfaces import (
+    ModelProvider,
+    PlaceProvider,
+    ProviderResult,
     RoutingProvider,
     TransitProvider,
-    PlaceProvider,
-    ModelProvider,
-    ProviderResult,
 )
+
 
 # ─────────────────────────────────────────────
 # MockPlaceProvider
@@ -20,7 +21,7 @@ class MockPlaceProvider(PlaceProvider):
     """고정 장소 데이터를 반환하는 Mock PlaceProvider."""
 
     # Seoul 랜드마크 고정 데이터
-    _MOCK_PLACES: List[dict] = [
+    _MOCK_PLACES: list[dict] = [
         {
             "place_id": "place_seoul_station",
             "name": "서울역",
@@ -71,15 +72,15 @@ class MockPlaceProvider(PlaceProvider):
     async def search_places(
         self,
         query: str,
-        latitude: Optional[float] = None,
-        longitude: Optional[float] = None,
-        radius_meters: Optional[int] = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_meters: int | None = None,
         limit: int = 5,
         offset: int = 0,
     ) -> ProviderResult:
         """검색어 포함 고정 장소 반환 (대소문자 구분 없는 부분 일치)."""
         q = query.lower()
-        results: List[PlaceResult] = []
+        results: list[PlaceResult] = []
         for p in self._MOCK_PLACES:
             if q in p["name"].lower() or q in p["address"].lower():
                 if len(results) >= limit:
@@ -104,14 +105,14 @@ class MockRoutingProvider(RoutingProvider):
         self,
         origin_place_id: str,
         destination_place_id: str,
-        departure_at: Optional[str] = None,
-        arrival_deadline: Optional[str] = None,
-        transport_mode: Optional[str] = None,
+        departure_at: str | None = None,
+        arrival_deadline: str | None = None,
+        transport_mode: str | None = None,
         max_options: int = 5,
     ) -> ProviderResult:
         """고정 이동 옵션 2~3개 반환 (subway + walking + bus)."""
 
-        options: List[dict] = [
+        options: list[dict] = [
             {
                 "option_id": f"opt_{origin_place_id}_{destination_place_id}_subway_1",
                 "leg_index": 0,
@@ -172,7 +173,7 @@ class MockRoutingProvider(RoutingProvider):
             options = [o for o in options if o.get("mode") == transport_mode]
 
         # max_options 제한
-        options = options[:max(max_options, 1)]
+        options = options[: max(max_options, 1)]
 
         return ProviderResult(ok=True, data=options)
 
@@ -189,7 +190,7 @@ class MockTransitProvider(TransitProvider):
     async def get_transit_details(
         self,
         option_id: str,
-        departure_at: Optional[str] = None,
+        departure_at: str | None = None,
     ) -> ProviderResult:
         """옵션 ID 기반 고정 상세 반환."""
         details = {
@@ -224,7 +225,7 @@ class MockModelProvider(ModelProvider):
     async def interpret(
         self,
         user_text: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> ProviderResult:
         """간단한 키워드 기반 Mock 해석."""
         text_lower = user_text.lower()
@@ -255,13 +256,15 @@ class MockModelProvider(ModelProvider):
             result["arrival_deadline"] = "2026-09-16T10:00:00+09:00"
         # "오후 X시" 패턴 인식 (MockModelProvider 개선)
         import re
-        time_match = re.search(r'오후\s*(\d{1,2})\s*시', user_text)
+
+        time_match = re.search(r"오후\s*(\d{1,2})\s*시", user_text)
         if time_match:
             hour = int(time_match.group(1))
             if hour < 12:
                 hour += 12
-            from datetime import datetime, timedelta, timezone
+            from datetime import datetime, timedelta
             from zoneinfo import ZoneInfo
+
             seoul = ZoneInfo("Asia/Seoul")
             now = datetime.now(seoul)
             deadline = now.replace(hour=hour, minute=0, second=0, microsecond=0)

@@ -7,10 +7,9 @@ T064: 재시도 정책
 - 같은 Idempotency-Key·같은 body로 재시도
 - 4xx·409·410·검증 실패·invalid response는 재시도 안 함
 """
+
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional, Any, Callable, Awaitable
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,9 @@ RETRYABLE_EXCEPTIONS = (
 class ProviderClientError(Exception):
     """Provider 호출 오류."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None, retryable: bool = False):
+    def __init__(
+        self, message: str, status_code: int | None = None, retryable: bool = False
+    ):
         self.message = message
         self.status_code = status_code
         self.retryable = retryable
@@ -64,9 +65,9 @@ class ProviderClient:
         self,
         method: str,
         path: str,
-        body: Optional[dict] = None,
-        idempotency_key: Optional[str] = None,
-        headers: Optional[dict] = None,
+        body: dict | None = None,
+        idempotency_key: str | None = None,
+        headers: dict | None = None,
         retryable: bool = False,
     ) -> dict:
         """Provider 호출 (재시도 정책 적용).
@@ -95,7 +96,7 @@ class ProviderClient:
         if headers:
             request_headers.update(headers)
 
-        last_error: Optional[ProviderClientError] = None
+        last_error: ProviderClientError | None = None
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -130,9 +131,7 @@ class ProviderClient:
                 # 5xx → retryable 여부 확인
                 status = response.get("status_code", 0)
                 if status in RETRYABLE_STATUS_CODES or retryable:
-                    logger.warning(
-                        f"Provider retryable 5xx 응답: {status} - 재시도"
-                    )
+                    logger.warning(f"Provider retryable 5xx 응답: {status} - 재시도")
                     last_error = ProviderClientError(
                         message=f"Provider 오류: {status}",
                         status_code=status,
@@ -150,9 +149,7 @@ class ProviderClient:
 
             except RETRYABLE_EXCEPTIONS as e:
                 # 연결 실패·timeout → 재시도
-                logger.warning(
-                    f"Provider 연결 실패/timeout (시도 {attempt + 1}): {e}"
-                )
+                logger.warning(f"Provider 연결 실패/timeout (시도 {attempt + 1}): {e}")
                 last_error = ProviderClientError(
                     message=f"Provider 연결 실패: {str(e)}",
                     retryable=True,
@@ -178,7 +175,7 @@ class ProviderClient:
         self,
         method: str,
         url: str,
-        body: Optional[dict],
+        body: dict | None,
         headers: dict,
     ) -> dict:
         """실제 HTTP 요청 실행 (구현 시 httpx 등으로 대체).

@@ -4,9 +4,10 @@
 각 인터페이스는 최소한의 계약만 정의하며, 구체적인 요청/응답 스키마는
 호출 측에서 담당한다.
 """
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 
 # ─────────────────────────────────────────────
@@ -15,11 +16,12 @@ from typing import Any, List, Optional
 @dataclass
 class ProviderResult:
     """제공자 호출 결과 공통 래퍼."""
+
     ok: bool
     data: Any = None
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
-    http_status: Optional[int] = None
+    error_code: str | None = None
+    error_message: str | None = None
+    http_status: int | None = None
 
 
 # ─────────────────────────────────────────────
@@ -36,9 +38,9 @@ class RoutingProvider(ABC):
         self,
         origin_place_id: str,
         destination_place_id: str,
-        departure_at: Optional[str] = None,
-        arrival_deadline: Optional[str] = None,
-        transport_mode: Optional[str] = None,
+        departure_at: str | None = None,
+        arrival_deadline: str | None = None,
+        transport_mode: str | None = None,
         max_options: int = 5,
     ) -> ProviderResult:
         """이동 옵션 검색.
@@ -75,7 +77,7 @@ class TransitProvider(ABC):
     async def get_transit_details(
         self,
         option_id: str,
-        departure_at: Optional[str] = None,
+        departure_at: str | None = None,
     ) -> ProviderResult:
         """특정 옵션의 대중교통 상세 정보 조회.
 
@@ -107,9 +109,9 @@ class PlaceProvider(ABC):
     async def search_places(
         self,
         query: str,
-        latitude: Optional[float] = None,
-        longitude: Optional[float] = None,
-        radius_meters: Optional[int] = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_meters: int | None = None,
         limit: int = 5,
         offset: int = 0,
     ) -> ProviderResult:
@@ -148,7 +150,7 @@ class ModelProvider(ABC):
     async def interpret(
         self,
         user_text: str,
-        context: Optional[dict] = None,
+        context: dict | None = None,
     ) -> ProviderResult:
         """사용자 발화 자연어 해석.
 

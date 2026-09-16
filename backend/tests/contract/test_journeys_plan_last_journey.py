@@ -6,15 +6,8 @@
 - 정상 막차 계획 검증 (Mock 환경에서 지원 가능하다고 가정 시)
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 import uuid
-
-from app.schemas.errors import ErrorCode
-from app.schemas.journeys import TripRequest, Plan
-from app.schemas.common import Envelope
+from zoneinfo import ZoneInfo
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -45,7 +38,9 @@ class TestLastJourneyContract:
         )
 
         # 상태 코드 검증: Mock은 지원하므로 200 반환
-        assert response.status_code == 200, f"예상 200, 실제 {response.status_code}: {response.text}"
+        assert response.status_code == 200, (
+            f"예상 200, 실제 {response.status_code}: {response.text}"
+        )
 
         body = response.json()
         assert body.get("status") == "ok", f"status=ok 기대, 실제={body.get('status')}"
@@ -53,12 +48,14 @@ class TestLastJourneyContract:
         assert body.get("error") is None, "error 필드에 값이 있음"
 
         data = body["data"]
-        
+
         # Plan 구조 검증
         assert "plan_id" in data, "plan_id 누락"
         assert "is_last_journey" in data, "is_last_journey 필드 누락"
-        assert data["is_last_journey"] is True, f"is_last_journey=True 기대, 실제={data.get('is_last_journey')}"
-        
+        assert data["is_last_journey"] is True, (
+            f"is_last_journey=True 기대, 실제={data.get('is_last_journey')}"
+        )
+
         # 막차 관련 필드 검증
         assert "operating_date" in data, "operating_date 필드 누락"
         assert "arrival_date" in data, "arrival_date 필드 누락"
@@ -105,14 +102,15 @@ class TestLastJourneyContract:
 
         assert response.status_code == 422
         body = response.json()
-        
+
         # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
         assert body["status"] == "error"
         assert body["error"]["code"] == "VALIDATION_ERROR"
         # details에서 field 정보 확인
         details = body["error"].get("details", [])
-        assert any("origin_place_id" in d.get("field", "") for d in details), \
+        assert any("origin_place_id" in d.get("field", "") for d in details), (
             f"details에 origin_place_id 관련 오류 포함 기대: {details}"
+        )
 
     def test_last_journey_response_common_envelope(self, client):
         """막차 계획 응답 envelope 구조 검증.
@@ -170,14 +168,15 @@ class TestLastJourneyContract:
 
         assert response.status_code == 422
         body = response.json()
-        
+
         # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
         assert body["status"] == "error"
         assert body["error"]["code"] == "VALIDATION_ERROR"
         # details에서 field 정보 확인
         details = body["error"].get("details", [])
-        assert any("origin_place_id" in d.get("field", "") for d in details), \
-            f"details에 origin_place_id 관련 오류 포함 기대: {details}" 
+        assert any("origin_place_id" in d.get("field", "") for d in details), (
+            f"details에 origin_place_id 관련 오류 포함 기대: {details}"
+        )
 
     def test_last_journey_idempotency_key_required(self, client):
         """Idempotency-Key 누락 → 422.
@@ -199,9 +198,11 @@ class TestLastJourneyContract:
         )
 
         # Idempotency-Key 없으면 422 (FastAPI Header 검증 또는 엔드포인트 내부 검증)
-        assert response.status_code == 422, f"예상 422, 실제 {response.status_code}: {response.text}"
+        assert response.status_code == 422, (
+            f"예상 422, 실제 {response.status_code}: {response.text}"
+        )
         body = response.json()
-        
+
         # 응답 형식 검증: envelope 또는 FastAPI 기본값 모두 허용
         if body.get("status") == "error":
             assert "Idempotency-Key" in body["error"]["message"]
@@ -209,6 +210,10 @@ class TestLastJourneyContract:
             # FastAPI 기본 검증 오류 형식 - detail은 문자열 또는 문자열 리스트
             detail = body["detail"]
             if isinstance(detail, str):
-                assert "Idempotency-Key" in detail, f"detail에 Idempotency-Key 포함 기대: {detail}"
+                assert "Idempotency-Key" in detail, (
+                    f"detail에 Idempotency-Key 포함 기대: {detail}"
+                )
             elif isinstance(detail, list):
-                assert any("Idempotency-Key" in str(d) for d in detail),                     f"detail에 Idempotency-Key 관련 오류 포함 기대: {detail}"
+                assert any("Idempotency-Key" in str(d) for d in detail), (
+                    f"detail에 Idempotency-Key 관련 오류 포함 기대: {detail}"
+                )

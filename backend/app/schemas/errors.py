@@ -1,6 +1,7 @@
 from enum import Enum
+from typing import Any
+
 from pydantic import BaseModel, Field
-from typing import Optional, Any
 
 
 # ─────────────────────────────────────────────
@@ -8,23 +9,23 @@ from typing import Optional, Any
 # ─────────────────────────────────────────────
 class ErrorCode(str, Enum):
     # 4xx 클라이언트 오류
-    VALIDATION_ERROR = "VALIDATION_ERROR"                    # 422
-    USER_CONFIRMATION_REQUIRED = "USER_CONFIRMATION_REQUIRED" # 422
-    PLACE_NOT_RESOLVABLE = "PLACE_NOT_RESOLVABLE"            # 422
-    CONVERSATION_NOT_FOUND = "CONVERSATION_NOT_FOUND"        # 404
+    VALIDATION_ERROR = "VALIDATION_ERROR"  # 422
+    USER_CONFIRMATION_REQUIRED = "USER_CONFIRMATION_REQUIRED"  # 422
+    PLACE_NOT_RESOLVABLE = "PLACE_NOT_RESOLVABLE"  # 422
+    CONVERSATION_NOT_FOUND = "CONVERSATION_NOT_FOUND"  # 404
     CONVERSATION_VERSION_CONFLICT = "CONVERSATION_VERSION_CONFLICT"  # 409
-    IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED"        # 409
-    CONVERSATION_EXPIRED = "CONVERSATION_EXPIRED"            # 410
-    CANDIDATE_SET_EXPIRED = "CANDIDATE_SET_EXPIRED"          # 410
-    RATE_LIMITED = "RATE_LIMITED"                            # 429
+    IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED"  # 409
+    CONVERSATION_EXPIRED = "CONVERSATION_EXPIRED"  # 410
+    CANDIDATE_SET_EXPIRED = "CANDIDATE_SET_EXPIRED"  # 410
+    RATE_LIMITED = "RATE_LIMITED"  # 429
 
     # 5xx 서버 오류
-    INTERNAL_ERROR = "INTERNAL_ERROR"                        # 500
+    INTERNAL_ERROR = "INTERNAL_ERROR"  # 500
     UPSTREAM_RESPONSE_INVALID = "UPSTREAM_RESPONSE_INVALID"  # 502
     ROUTING_PROVIDER_UNAVAILABLE = "ROUTING_PROVIDER_UNAVAILABLE"  # 503
-    PLACE_PROVIDER_UNAVAILABLE = "PLACE_PROVIDER_UNAVAILABLE"      # 503
-    AI_UNAVAILABLE = "AI_UNAVAILABLE"                        # 503
-    UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"                    # 504
+    PLACE_PROVIDER_UNAVAILABLE = "PLACE_PROVIDER_UNAVAILABLE"  # 503
+    AI_UNAVAILABLE = "AI_UNAVAILABLE"  # 503
+    UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"  # 504
 
 
 # ─────────────────────────────────────────────
@@ -136,10 +137,11 @@ ERROR_CATALOG: dict[ErrorCode, ErrorDetail] = {
 # ─────────────────────────────────────────────
 class ErrorResponse(BaseModel):
     """개별 오류 객체 (envelope.error 필드)."""
+
     code: ErrorCode
     message: str
     status_code: int = Field(..., ge=400, le=599)
-    details: Optional[Any] = None
+    details: Any | None = None
 
     class Config:
         json_schema_extra = {
@@ -172,6 +174,7 @@ class ErrorResponse(BaseModel):
 
 class ErrorEnvelope(BaseModel):
     """오류 전용 봉투 (일관성 유지용）。"""
+
     status: str = "error"
     data: None = None
     error: ErrorResponse

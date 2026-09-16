@@ -2,20 +2,21 @@
 
 T066: interpret 응답에 conversation_id, revision, expires_at 포함.
 """
+
 import logging
 import uuid
-from fastapi import APIRouter, HTTPException, Header, Response
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from fastapi import APIRouter, Header, Response
+
+from app.api.responses import error_response, success_response
+from app.schemas.common import Envelope, Meta
+from app.schemas.errors import ErrorCode
 from app.schemas.mobility import (
     InterpretRequest,
-    InterpretResponse,
 )
-from app.schemas.errors import ErrorCode
-from app.schemas.common import Envelope, Meta
 from app.services.interpret_service import InterpretService
-from app.api.responses import success_response, error_response
 
 logger = logging.getLogger(__name__)
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -24,6 +25,7 @@ router = APIRouter()
 
 # Mock 모델 제공자 (실제 구현 시 LLM 기반 제공자로 교체)
 from app.services.mock.mock_providers import MockModelProvider
+
 mock_model_provider = MockModelProvider()
 interpret_service = InterpretService(model_provider=mock_model_provider)
 
@@ -77,7 +79,8 @@ async def mobility_interpret(
         response_dict = {
             "trip_draft": response_data.trip_draft.model_dump(mode="json"),
             "confirmation_questions": [
-                q.model_dump(exclude_none=True) for q in response_data.confirmation_questions
+                q.model_dump(exclude_none=True)
+                for q in response_data.confirmation_questions
             ],
             "requires_confirmation": response_data.requires_confirmation,
             "next_action": response_data.next_action,
@@ -92,7 +95,9 @@ async def mobility_interpret(
             is_demo=True,
             conversation_id=conversation_id,
             revision=1,  # interpret 단계에서는 revision=1 (새 대화 생성 시)
-            expires_at=(datetime.now(SEOUL_TZ) + __import__("datetime").timedelta(days=1)).isoformat(),
+            expires_at=(
+                datetime.now(SEOUL_TZ) + __import__("datetime").timedelta(days=1)
+            ).isoformat(),
         )
 
         # 응답 헤더에 Idempotency-Key 반환 (SC-013)

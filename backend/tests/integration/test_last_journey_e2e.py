@@ -6,16 +6,12 @@
 - envelope 응답 구조 검증
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 import uuid
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from app.schemas.journeys import Plan, TripRequest
-from app.schemas.errors import ErrorCode
-from app.schemas.common import Envelope
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
+from app.schemas.journeys import TripRequest
+from app.services.provider_interfaces import ProviderResult, RoutingProvider
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -89,14 +85,15 @@ class TestLastJourneyE2EWithActualMock:
 
         assert response.status_code == 422
         body = response.json()
-        
+
         # envelope 오류 형식 (API_SPEC.md §4 공통 응답)
         assert body["status"] == "error"
         assert body["error"]["code"] == "VALIDATION_ERROR"
         # details에서 field 정보 확인
         details = body["error"].get("details", [])
-        assert any("origin_place_id" in d.get("field", "") for d in details), \
+        assert any("origin_place_id" in d.get("field", "") for d in details), (
             f"details에 origin_place_id 관련 오류 포함 기대: {details}"
+        )
 
     def test_e2e_last_journey_idempotency_key_validation(self, client):
         """Idempotency-Key 검증: 누락 시 422."""
@@ -112,7 +109,7 @@ class TestLastJourneyE2EWithActualMock:
 
         assert response.status_code == 422
         body = response.json()
-        
+
         # envelope 오류 형식 (APISPEC.md §4 공통 응답)
         assert body["status"] == "error"
         assert body["error"]["code"] == "VALIDATION_ERROR"
@@ -121,18 +118,23 @@ class TestLastJourneyE2EWithActualMock:
         details = body["error"].get("details", [])
         assert isinstance(details, list), f"details는 리스트여야 함: {type(details)}"
         # data/meta 미포함 검증 (오류 응답)
-        assert body.get("data") is None, f"error 응답에서 data는 null: {body.get('data')}"
+        assert body.get("data") is None, (
+            f"error 응답에서 data는 null: {body.get('data')}"
+        )
         assert body.get("meta") is not None, "error 응답에도 meta는 포함"
         # 계산/상태 변경 미발생: 응답 헤더에 Idempotency-Key 없음 (SC-013)
         # (TestClient에서는 headers로 접근)
-        assert "Idempotency-Key" not in response.headers or response.headers.get("Idempotency-Key") is None
+        assert (
+            "Idempotency-Key" not in response.headers
+            or response.headers.get("Idempotency-Key") is None
+        )
 
     def test_e2e_last_journey_plan_structure_when_supported(self, client):
         """Mock 제공자 패치 시 막차 Plan 구조 검증.
 
         MockRoutingProvider가 막차 옵션을 반환하도록 patched하여 검증.
         """
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock
 
         # Mock provider 패치: 막차 옵션 반환하도록
         mock_provider = AsyncMock(spec=RoutingProvider)
@@ -178,11 +180,13 @@ class TestLastJourneyE2EWithActualMock:
 
         # API 라우터의 mock_provider를 교체
         from app.api.journeys import mock_routing_provider
+
         original = mock_routing_provider
 
         try:
             # mock_routing_provider 객체를 MockRoutingProvider에서 AsyncMock으로 교체
             import app.api.journeys as journeys_api
+
             journeys_api.mock_routing_provider = mock_provider
 
             response = client.post(
@@ -201,7 +205,9 @@ class TestLastJourneyE2EWithActualMock:
             # 현재는 check_last_journey_supported가 False를 반환하므로 미지원
             # Mock 구조상 plan_last_journey를 직접 호출할 때만 지원됨
             # 이 테스트는 check_last_journey_supported 패치가 필요할 수 있음
-            assert response.status_code in [200, 422], f"예상 200/422, 실제 {response.status_code}"
+            assert response.status_code in [200, 422], (
+                f"예상 200/422, 실제 {response.status_code}"
+            )
 
         finally:
             # 원래 provider로 복원
@@ -213,7 +219,8 @@ class TestLastJourneyE2EWithActualMock:
         Mock 제공자가 막차 옵션을 반환할 때,
         operating_date와 arrival_date가 구분되는지 검증.
         """
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
+
         from app.services.last_journey_service import LastJourneyService
 
         # 막차 서비스 직접 호출 테스트
@@ -236,11 +243,14 @@ class TestLastJourneyE2EWithActualMock:
         service = LastJourneyService(routing_provider=mock_provider)
 
         # check_last_journey_supported 패치
-        with patch.object(service, "check_last_journey_supported", new_callable=AsyncMock) as mock_check:
+        with patch.object(
+            service, "check_last_journey_supported", new_callable=AsyncMock
+        ) as mock_check:
             mock_check.return_value = True
 
             import asyncio
-        plan = asyncio.run(service.plan_last_journey(
+        plan = asyncio.run(
+            service.plan_last_journey(
                 request=TripRequest(
                     conversation_id="e2e_last_006",
                     origin_place_id="place_seoul_station",
@@ -249,7 +259,8 @@ class TestLastJourneyE2EWithActualMock:
                     arrival_preference_minutes=10,
                 ),
                 buffer_minutes=5,
-            ))
+            )
+        )
 
         # 운행일과 도착 날짜 구분 검증
         assert plan.operating_date is not None
@@ -260,6 +271,7 @@ class TestLastJourneyE2EWithActualMock:
 
         # 날짜 검증
         from datetime import datetime as dt
+
         op_date = dt.strptime(plan.operating_date, "%Y-%m-%d").date()
         arr_date = dt.strptime(plan.arrival_date, "%Y-%m-%d").date()
 
@@ -268,7 +280,8 @@ class TestLastJourneyE2EWithActualMock:
 
     def test_e2e_last_journey_comparison_structure(self):
         """막차 Plan의 comparison 구조 검증."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
+
         from app.schemas.journeys import TripRequest
         from app.services.last_journey_service import LastJourneyService
 
@@ -297,21 +310,28 @@ class TestLastJourneyE2EWithActualMock:
 
         service = LastJourneyService(routing_provider=mock_provider)
 
-        with patch.object(service, "check_last_journey_supported", new_callable=AsyncMock) as mock_check:
+        with patch.object(
+            service, "check_last_journey_supported", new_callable=AsyncMock
+        ) as mock_check:
             mock_check.return_value = True
 
             import asyncio
-            plan = asyncio.run(service.plan_last_journey(
-                request=TripRequest(
-                    conversation_id="e2e_last_007",
-                    origin_place_id="place_seoul_station",
-                    destination_place_id="place_gangnam_station",
-                    arrival_deadline=datetime(2026, 9, 17, 0, 30, 0, tzinfo=SEOUL_TZ),
-                    arrival_preference_minutes=10,
-                    max_options=3,
-                ),
-                buffer_minutes=5,
-            ))
+
+            plan = asyncio.run(
+                service.plan_last_journey(
+                    request=TripRequest(
+                        conversation_id="e2e_last_007",
+                        origin_place_id="place_seoul_station",
+                        destination_place_id="place_gangnam_station",
+                        arrival_deadline=datetime(
+                            2026, 9, 17, 0, 30, 0, tzinfo=SEOUL_TZ
+                        ),
+                        arrival_preference_minutes=10,
+                        max_options=3,
+                    ),
+                    buffer_minutes=5,
+                )
+            )
 
         # comparison 구조 검증
         assert plan.comparison is not None
@@ -327,4 +347,6 @@ class TestLastJourneyE2EWithActualMock:
             assert len(opt.reasoning) > 0
 
         # selected_option_id 검증
-        assert plan.comparison.selected_option_id == plan.comparison.options[0].option_id
+        assert (
+            plan.comparison.selected_option_id == plan.comparison.options[0].option_id
+        )

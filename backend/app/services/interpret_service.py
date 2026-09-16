@@ -7,18 +7,16 @@ T036: interpret_service.py 생성.
 """
 
 import logging
-from typing import Optional, List
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.schemas.mobility import (
-    TripDraft,
     ConfirmationQuestion,
     InterpretRequest,
     InterpretResponse,
-    PlaceInfo,
+    TripDraft,
 )
-from app.services.provider_interfaces import ModelProvider, ProviderResult
+from app.services.provider_interfaces import ModelProvider
 
 logger = logging.getLogger(__name__)
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -75,9 +73,11 @@ class InterpretService:
             natural_language=natural_lang,
         )
 
-        requires_confirmation = any(
-            q.question_type == "place_confirmation" for q in questions
-        ) or not parsed.get("origin_place_id") or not parsed.get("destination_place_id")
+        requires_confirmation = (
+            any(q.question_type == "place_confirmation" for q in questions)
+            or not parsed.get("origin_place_id")
+            or not parsed.get("destination_place_id")
+        )
 
         return InterpretResponse(
             trip_draft=trip_draft,
@@ -168,14 +168,28 @@ class InterpretService:
             result["transport_mode"] = None
 
         # MockProvider가 needs_confirmation을 제공한 경우, place_name이 없으면 생성
-        if data.get("needs_confirmation") and not result.get("origin_place_name") and result.get("origin_place_id"):
-            result["origin_place_name"] = result["origin_place_id"].replace("place_", "").replace("_", " ")
-        if data.get("needs_confirmation") and not result.get("destination_place_name") and result.get("destination_place_id"):
-            result["destination_place_name"] = result["destination_place_id"].replace("place_", "").replace("_", " ")
+        if (
+            data.get("needs_confirmation")
+            and not result.get("origin_place_name")
+            and result.get("origin_place_id")
+        ):
+            result["origin_place_name"] = (
+                result["origin_place_id"].replace("place_", "").replace("_", " ")
+            )
+        if (
+            data.get("needs_confirmation")
+            and not result.get("destination_place_name")
+            and result.get("destination_place_id")
+        ):
+            result["destination_place_name"] = (
+                result["destination_place_id"].replace("place_", "").replace("_", " ")
+            )
 
         return result
 
-    def _fallback_parse(self, text: str, existing_deadline: Optional[datetime] = None) -> dict:
+    def _fallback_parse(
+        self, text: str, existing_deadline: datetime | None = None
+    ) -> dict:
         """규칙 기반 fallback 파싱.
 
         모델 제공자 실패 시 기본적인 시간/장소 패턴 매칭으로 해석.
@@ -200,32 +214,38 @@ class InterpretService:
 
             # 시간 패턴 추출: "오후 7시", "7pm", "19:00", "7시"
             time_patterns = [
-                r'(\d{1,2})\s*:\s*(\d{2})\s*(?:까지|에|까지\s*도착)',
-                r'오후\s*(\d{1,2})\s*시',
-                r'저녁\s*(\d{1,2})\s*시',
-                r'(\d{1,2})\s*pm',
-                r'(\d{1,2})\s*시\s*까지',
-                r'(\d{1,2})\s*시\s*에\s*도착',
+                r"(\d{1,2})\s*:\s*(\d{2})\s*(?:까지|에|까지\s*도착)",
+                r"오후\s*(\d{1,2})\s*시",
+                r"저녁\s*(\d{1,2})\s*시",
+                r"(\d{1,2})\s*pm",
+                r"(\d{1,2})\s*시\s*까지",
+                r"(\d{1,2})\s*시\s*에\s*도착",
             ]
 
             arrival_time = None
             for pattern in time_patterns:
                 m = re.search(pattern, text)
                 if m:
-                    if len(m.groups()) >= 2 and ':' in text[m.start():m.end()]:
+                    if len(m.groups()) >= 2 and ":" in text[m.start() : m.end()]:
                         hour, minute = int(m.group(1)), int(m.group(2))
                     elif len(m.groups()) >= 1:
                         hour = int(m.group(1))
                         minute = 0
                         # 오후/저녁 보정
-                        if '오후' in text[:m.start()] or '저녁' in text[:m.start()] or 'pm' in text[m.start():m.end()].lower():
+                        if (
+                            "오후" in text[: m.start()]
+                            or "저녁" in text[: m.start()]
+                            or "pm" in text[m.start() : m.end()].lower()
+                        ):
                             if hour < 12:
                                 hour += 12
                     else:
                         continue
 
                     if 0 <= hour <= 23 and 0 <= minute <= 59:
-                        arrival_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                        arrival_time = now.replace(
+                            hour=hour, minute=minute, second=0, microsecond=0
+                        )
                         # 오늘 날짜 기준, 과거면 내일
                         if arrival_time < now:
                             arrival_time += timedelta(days=1)
@@ -235,17 +255,17 @@ class InterpretService:
                 result["arrival_deadline"] = arrival_time
 
         # 장소 힌트: "~역에서", "~에 도착", "집에서" 등
-        if '집' in text or 'home' in text.lower():
+        if "집" in text or "home" in text.lower():
             result["origin_place_name"] = "집"
             result["origin_place_id"] = None  # 집은 장소 ID 미확정
 
         # 목적지 패턴: "~역에", "~에 도착해야"
         dest_patterns = [
-            (r'(\w+)\s*역에\s*(?:도착|가야|가야\s*해)', 'subway_station'),
-            (r'(\w+)\s*터미널', 'terminal'),
-            (r'(\w+)\s*병원', 'hospital'),
-            (r'(\w+)\s*회사', 'office'),
-            (r'(\w+)\s*학교', 'school'),
+            (r"(\w+)\s*역에\s*(?:도착|가야|가야\s*해)", "subway_station"),
+            (r"(\w+)\s*터미널", "terminal"),
+            (r"(\w+)\s*병원", "hospital"),
+            (r"(\w+)\s*회사", "office"),
+            (r"(\w+)\s*학교", "school"),
         ]
 
         for pattern, place_type in dest_patterns:
@@ -257,7 +277,10 @@ class InterpretService:
                 break
 
         return result
-    def _generate_confirmation_questions(self, parsed: dict) -> List[ConfirmationQuestion]:
+
+    def _generate_confirmation_questions(
+        self, parsed: dict
+    ) -> list[ConfirmationQuestion]:
         """해석 결과로부터 확인 질문 생성.
 
         Args:
@@ -272,102 +295,132 @@ class InterpretService:
         origin_id = parsed.get("origin_place_id")
         origin_name = parsed.get("origin_place_name")
         if not origin_id and not origin_name:
-            questions.append(ConfirmationQuestion(
-                question_type="place_confirmation",
-                place_id=None,
-                place_name="출발지",
-                question="출발지를 확인해주세요. '집'에서 출발하시나요?",
-                alternatives=[
-                    {"place_id": None, "place_name": "집", "description": "현재 위치/집"},
-                    {"place_id": None, "place_name": "다른 장소", "description": "직접 입력"},
-                ],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="place_confirmation",
+                    place_id=None,
+                    place_name="출발지",
+                    question="출발지를 확인해주세요. '집'에서 출발하시나요?",
+                    alternatives=[
+                        {
+                            "place_id": None,
+                            "place_name": "집",
+                            "description": "현재 위치/집",
+                        },
+                        {
+                            "place_id": None,
+                            "place_name": "다른 장소",
+                            "description": "직접 입력",
+                        },
+                    ],
+                )
+            )
         elif origin_id is None and origin_name:
             # 이름은 있지만 ID 미확정
-            questions.append(ConfirmationQuestion(
-                question_type="place_confirmation",
-                place_id=None,
-                place_name=origin_name,
-                question=f"출발지를 '{origin_name}'로 확인하셨나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="place_confirmation",
+                    place_id=None,
+                    place_name=origin_name,
+                    question=f"출발지를 '{origin_name}'로 확인하셨나요?",
+                    alternatives=[],
+                )
+            )
         elif origin_id:
             # ID는 있지만 확인 질문 포함 (place_id 포함)
-            questions.append(ConfirmationQuestion(
-                question_type="place_confirmation",
-                place_id=origin_id,
-                place_name=origin_name or origin_id.replace("place_", "").replace("_", " "),
-                question=f"출발지를 '{origin_name or origin_id}'로 확인하셨나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="place_confirmation",
+                    place_id=origin_id,
+                    place_name=origin_name
+                    or origin_id.replace("place_", "").replace("_", " "),
+                    question=f"출발지를 '{origin_name or origin_id}'로 확인하셨나요?",
+                    alternatives=[],
+                )
+            )
 
         # 목적지 확인 질문
         dest_id = parsed.get("destination_place_id")
         dest_name = parsed.get("destination_place_name")
         if not dest_id and not dest_name:
-            questions.append(ConfirmationQuestion(
-                question_type="place_confirmation",
-                place_id=None,
-                place_name="목적지",
-                question="목적지를 확인해주세요. 어디로 가시나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="place_confirmation",
+                    place_id=None,
+                    place_name="목적지",
+                    question="목적지를 확인해주세요. 어디로 가시나요?",
+                    alternatives=[],
+                )
+            )
         elif dest_id is None and dest_name:
-            questions.append(ConfirmationQuestion(
-                question_type="place_confirmation",
-                place_id=None,
-                place_name=dest_name,
-                question=f"목적지를 '{dest_name}'로 확인하셨나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="place_confirmation",
+                    place_id=None,
+                    place_name=dest_name,
+                    question=f"목적지를 '{dest_name}'로 확인하셨나요?",
+                    alternatives=[],
+                )
+            )
         elif dest_id:
-            questions.append(ConfirmationQuestion(
-                question_type="place_confirmation",
-                place_id=dest_id,
-                place_name=dest_name or dest_id.replace("place_", "").replace("_", " "),
-                question=f"목적지를 '{dest_name or dest_id}'로 확인하셨나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="place_confirmation",
+                    place_id=dest_id,
+                    place_name=dest_name
+                    or dest_id.replace("place_", "").replace("_", " "),
+                    question=f"목적지를 '{dest_name or dest_id}'로 확인하셨나요?",
+                    alternatives=[],
+                )
+            )
 
         # 도착 마감 시간 확인
         if parsed.get("arrival_deadline"):
             deadline = parsed["arrival_deadline"]
             time_str = deadline.strftime("%H시 %M분")
-            questions.append(ConfirmationQuestion(
-                question_type="condition_confirmation",
-                place_id=None,
-                place_name=None,
-                question=f"도착 마감 시각을 '{time_str}'으로 확인하셨나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="condition_confirmation",
+                    place_id=None,
+                    place_name=None,
+                    question=f"도착 마감 시각을 '{time_str}'으로 확인하셨나요?",
+                    alternatives=[],
+                )
+            )
         else:
-            questions.append(ConfirmationQuestion(
-                question_type="condition_confirmation",
-                place_id=None,
-                place_name=None,
-                question="도착 마감 시각을 알려주세요. 몇시까지 도착해야 하나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="condition_confirmation",
+                    place_id=None,
+                    place_name=None,
+                    question="도착 마감 시각을 알려주세요. 몇시까지 도착해야 하나요?",
+                    alternatives=[],
+                )
+            )
 
         # 이동수단 확인
         if parsed.get("transport_mode"):
             mode = parsed["transport_mode"]
-            questions.append(ConfirmationQuestion(
-                question_type="condition_confirmation",
-                place_id=None,
-                place_name=None,
-                question=f"이동수단을 '{mode}'로 확인하셨나요?",
-                alternatives=[],
-            ))
+            questions.append(
+                ConfirmationQuestion(
+                    question_type="condition_confirmation",
+                    place_id=None,
+                    place_name=None,
+                    question=f"이동수단을 '{mode}'로 확인하셨나요?",
+                    alternatives=[],
+                )
+            )
 
         # 도착 여유 시간 확인
         pref = parsed.get("arrival_preference_minutes", 10)
-        questions.append(ConfirmationQuestion(
-            question_type="condition_confirmation",
-            place_id=None,
-            place_name=None,
-            question=f"도착 여유 시간을 {pref}분으로 확인하셨나요? (여유 시간: 도착 마감 전 미리 도착하기 위한 버퍼)",
-            alternatives=[],
-        ))
+        questions.append(
+            ConfirmationQuestion(
+                question_type="condition_confirmation",
+                place_id=None,
+                place_name=None,
+                question=f"도착 여유 시간을 {pref}분으로 확인하셨나요? (여유 시간: 도착 마감 전 미리 도착하기 위한 버퍼)",
+                alternatives=[],
+            )
+        )
 
         return questions

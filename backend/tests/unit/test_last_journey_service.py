@@ -6,18 +6,19 @@
 - NO_FEASIBLE_JOURNEY 검증
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.schemas.journeys import TripRequest, Plan
+import pytest
+
+from app.schemas.journeys import Plan, TripRequest
 from app.services.last_journey_service import (
     LastJourneyService,
     LastJourneyUnsupportedError,
     NoFeasibleJourneyError,
 )
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
+from app.services.provider_interfaces import ProviderResult, RoutingProvider
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -83,8 +84,9 @@ def valid_last_journey_request():
     """Valid last journey request fixture (module level for all test classes)."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
+
     from app.schemas.journeys import TripRequest
-    
+
     SEOUL_TZ = ZoneInfo("Asia/Seoul")
     return TripRequest(
         conversation_id="test_conv_last_001",
@@ -94,7 +96,6 @@ def valid_last_journey_request():
         arrival_preference_minutes=10,
         max_options=3,
     )
-
 
 
 class TestLastJourneySupportCheck:
@@ -169,7 +170,9 @@ class TestLastJourneyPlan:
         with pytest.raises(NoFeasibleJourneyError) as exc_info:
             await service.plan_last_journey(request=request)
 
-        assert "경로가 없습니다" in str(exc_info.value.message) or "이용 가능한 경로" in str(exc_info.value.message)
+        assert "경로가 없습니다" in str(
+            exc_info.value.message
+        ) or "이용 가능한 경로" in str(exc_info.value.message)
         assert exc_info.value.status_code == 422
 
     @pytest.mark.asyncio
@@ -178,17 +181,19 @@ class TestLastJourneyPlan:
     ):
         """정상 막차 계획 → Plan 반환, 다음 날 도착 날짜 구분."""
         # Mock provider가 막차 옵션을 반환하도록 설정
-        last_journey_service.routing_provider.search_options.return_value = ProviderResult(
-            ok=True,
-            data=[
-                {
-                    "option_id": "opt_last_subway_1",
-                    "departure_at": "2026-09-16T23:00:00+09:00",
-                    "arrival_at": "2026-09-17T00:00:00+09:00",
-                    "total_duration_minutes": 60,
-                    "transport_mode": "subway",
-                }
-            ],
+        last_journey_service.routing_provider.search_options.return_value = (
+            ProviderResult(
+                ok=True,
+                data=[
+                    {
+                        "option_id": "opt_last_subway_1",
+                        "departure_at": "2026-09-16T23:00:00+09:00",
+                        "arrival_at": "2026-09-17T00:00:00+09:00",
+                        "total_duration_minutes": 60,
+                        "transport_mode": "subway",
+                    }
+                ],
+            )
         )
         # health 체크 우회: check_last_journey_supported가 True 반환하도록 패치
         with patch.object(
@@ -216,6 +221,7 @@ class TestLastJourneyPlan:
 
         # 날짜가 하루 차이인지 확인
         from datetime import datetime as dt
+
         op_date = dt.strptime(plan.operating_date, "%Y-%m-%d").date()
         arr_date = dt.strptime(plan.arrival_date, "%Y-%m-%d").date()
         assert (arr_date - op_date).days == 1, (
@@ -231,7 +237,9 @@ class TestOperatingDateValidation:
     """운행일 검증 테스트."""
 
     @pytest.mark.asyncio
-    async def test_operating_date_is_today(self, last_journey_service, valid_last_journey_request):
+    async def test_operating_date_is_today(
+        self, last_journey_service, valid_last_journey_request
+    ):
         """운행일은 오늘 날짜여야 함."""
         with patch.object(
             last_journey_service,
@@ -240,15 +248,17 @@ class TestOperatingDateValidation:
         ) as mock_check:
             mock_check.return_value = True
 
-            last_journey_service.routing_provider.search_options.return_value = ProviderResult(
-                ok=True,
-                data=[
-                    {
-                        "option_id": "opt_last_1",
-                        "departure_at": "2026-09-16T23:00:00+09:00",
-                        "total_duration_minutes": 60,
-                    }
-                ],
+            last_journey_service.routing_provider.search_options.return_value = (
+                ProviderResult(
+                    ok=True,
+                    data=[
+                        {
+                            "option_id": "opt_last_1",
+                            "departure_at": "2026-09-16T23:00:00+09:00",
+                            "total_duration_minutes": 60,
+                        }
+                    ],
+                )
             )
 
             plan = await last_journey_service.plan_last_journey(
@@ -282,16 +292,18 @@ class TestArrivalDateBoundary:
             mock_check.return_value = True
 
             # 출발 23:00, 소요시간 90분 → 도착 00:30 (다음 날)
-            last_journey_service.routing_provider.search_options.return_value = ProviderResult(
-                ok=True,
-                data=[
-                    {
-                        "option_id": "opt_last_1",
-                        "departure_at": "2026-09-16T23:00:00+09:00",
-                        "arrival_at": "2026-09-17T00:30:00+09:00",
-                        "total_duration_minutes": 90,
-                    }
-                ],
+            last_journey_service.routing_provider.search_options.return_value = (
+                ProviderResult(
+                    ok=True,
+                    data=[
+                        {
+                            "option_id": "opt_last_1",
+                            "departure_at": "2026-09-16T23:00:00+09:00",
+                            "arrival_at": "2026-09-17T00:30:00+09:00",
+                            "total_duration_minutes": 90,
+                        }
+                    ],
+                )
             )
 
             plan = await last_journey_service.plan_last_journey(
@@ -318,16 +330,18 @@ class TestArrivalDateBoundary:
             mock_check.return_value = True
 
             # 출발 22:00, 소요시간 60분 → 도착 23:00 (같은 날)
-            last_journey_service.routing_provider.search_options.return_value = ProviderResult(
-                ok=True,
-                data=[
-                    {
-                        "option_id": "opt_last_1",
-                        "departure_at": "2026-09-16T22:00:00+09:00",
-                        "arrival_at": "2026-09-16T23:00:00+09:00",
-                        "total_duration_minutes": 60,
-                    }
-                ],
+            last_journey_service.routing_provider.search_options.return_value = (
+                ProviderResult(
+                    ok=True,
+                    data=[
+                        {
+                            "option_id": "opt_last_1",
+                            "departure_at": "2026-09-16T22:00:00+09:00",
+                            "arrival_at": "2026-09-16T23:00:00+09:00",
+                            "total_duration_minutes": 60,
+                        }
+                    ],
+                )
             )
 
             plan = await last_journey_service.plan_last_journey(

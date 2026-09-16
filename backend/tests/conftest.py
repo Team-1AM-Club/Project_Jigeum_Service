@@ -1,16 +1,17 @@
 """테스트 픽스처: FastAPI TestClient, Mock 제공자, DB 세션."""
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from app.main import app
 from app.services.mock.mock_providers import (
+    MockModelProvider,
     MockPlaceProvider,
     MockRoutingProvider,
     MockTransitProvider,
-    MockModelProvider,
 )
-from app.schemas.common import Envelope
 
 # ─────────────────────────────────────────────
 # 테스트용 인메모리 SQLite DB
@@ -78,7 +79,6 @@ def client(db_session):
     주의: 실제 app은 get_db 의존성 사용. 테스트에서는 의존성 오버라이드 필요.
     간단한 테스트를 위해 app을 직접 사용.
     """
-    from app.main import app
 
     # 테스트용 클라이언트는 app 전역 사용
     with TestClient(app) as c:
@@ -105,6 +105,7 @@ def sample_conversation_data():
 def sample_place_search_query():
     """샘플 장소 검색 쿼리."""
     from app.schemas.places import PlaceSearchQuery
+
     return PlaceSearchQuery(
         query="서울역",
         latitude=37.5546,
@@ -114,6 +115,7 @@ def sample_place_search_query():
         offset=0,
     )
 
+
 # ─────────────────────────────────────────────
 # 막차 서비스 픽스처 (T044)
 # ─────────────────────────────────────────────
@@ -121,8 +123,9 @@ def sample_place_search_query():
 def mock_routing_provider_last_journey():
     """Mock RoutingProvider for last journey tests."""
     from unittest.mock import AsyncMock
+
     from app.services.provider_interfaces import RoutingProvider
-    
+
     provider = AsyncMock(spec=RoutingProvider)
     provider.health.return_value = True
     return provider
@@ -132,7 +135,7 @@ def mock_routing_provider_last_journey():
 def last_journey_service(mock_routing_provider_last_journey):
     """LastJourneyService fixture."""
     from app.services.last_journey_service import LastJourneyService
-    
+
     return LastJourneyService(routing_provider=mock_routing_provider_last_journey)
 
 
@@ -143,9 +146,10 @@ def last_journey_service(mock_routing_provider_last_journey):
 def mock_plan_service():
     """Mock PlanService for replan tests."""
     from unittest.mock import AsyncMock
+
     from app.services.plan_service import PlanService
     from app.services.provider_interfaces import RoutingProvider
-    
+
     service = AsyncMock(spec=PlanService)
     service.plan = AsyncMock()
     service.routing_provider = AsyncMock(spec=RoutingProvider)
@@ -157,5 +161,5 @@ def mock_plan_service():
 def replan_service(mock_plan_service):
     """ReplanService fixture."""
     from app.services.replan_service import ReplanService
-    
+
     return ReplanService(plan_service=mock_plan_service)

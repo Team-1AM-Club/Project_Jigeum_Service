@@ -2,17 +2,15 @@
 
 Conversation 모델 기반 CRUD + 만료(tombstone 전환) + hard delete.
 """
+
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationStatus
-from app.models.plan import Plan
-from app.schemas.errors import ErrorCode
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -26,7 +24,7 @@ def _ensure_aware_utc(dt):
     if dt is None:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -35,11 +33,11 @@ def _ensure_aware_utc(dt):
 # ─────────────────────────────────────────────
 def create_conversation(
     db: Session,
-    conversation_id: Optional[str] = None,
+    conversation_id: str | None = None,
     expires_in_minutes: int = 1440,  # 기본 24시간
-    confirmed_conditions: Optional[dict] = None,
-    candidate_set: Optional[dict] = None,
-    active_selected_plan: Optional[dict] = None,
+    confirmed_conditions: dict | None = None,
+    candidate_set: dict | None = None,
+    active_selected_plan: dict | None = None,
 ) -> Conversation:
     """새 대화 생성.
 
@@ -57,7 +55,7 @@ def create_conversation(
     if conversation_id is None:
         conversation_id = str(uuid.uuid4())
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + timedelta(minutes=expires_in_minutes)
 
     conv = Conversation(
@@ -83,7 +81,7 @@ def get_conversation(
     db: Session,
     conversation_id: str,
     include_expired: bool = False,
-) -> Optional[Conversation]:
+) -> Conversation | None:
     """conversation_id로 대화 조회.
 
     Args:
@@ -102,7 +100,10 @@ def get_conversation(
         return None
 
     # 기본: active만 반환, expired/tombstone은 제외
-    if not include_expired and conv.status in (ConversationStatus.EXPIRED, ConversationStatus.TOMBSTONE):
+    if not include_expired and conv.status in (
+        ConversationStatus.EXPIRED,
+        ConversationStatus.TOMBSTONE,
+    ):
         return None
 
     return conv
@@ -149,7 +150,7 @@ def update_conversation(
             setattr(conv, key, value)
 
     conv.revision += 1
-    conv.updated_at = datetime.now(timezone.utc)
+    conv.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(conv)
     return conv
@@ -174,7 +175,7 @@ def expire_conversation(
         return conv  # 이미 tombstone
 
     conv.status = ConversationStatus.TOMBSTONE
-    conv.updated_at = datetime.now(timezone.utc)
+    conv.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(conv)
     return conv
@@ -196,17 +197,19 @@ def hard_delete_conversation(
         return False
 
     if conv.status != ConversationStatus.TOMBSTONE:
-        raise ValueError(f"Hard delete는 tombstone 상태에서만 허용됨: status={conv.status.value}")
+        raise ValueError(
+            f"Hard delete는 tombstone 상태에서만 허용됨: status={conv.status.value}"
+        )
 
     db.delete(conv)
     db.commit()
     return True
 
 
-
 # ─────────────────────────────────────────────
 # 상태 전이 헬퍼
 # ─────────────────────────────────────────────
+
 
 def mark_conditions_confirmed(
     db: Session,
@@ -292,7 +295,7 @@ def mark_plan_selected(
 def check_and_handle_expiry(
     db: Session,
     conversation_id: str,
-) -> tuple[Optional[Conversation], bool]:
+) -> tuple[Conversation | None, bool]:
     """만료 확인 + tombstone 전환 (멱등).
 
     expires_at <= now 이면:
@@ -313,7 +316,7 @@ def check_and_handle_expiry(
     if conv is None:
         return None, False  # conversation 없음 → 404로 처리해야 함
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if conv.status == ConversationStatus.TOMBSTONE:
         # 이미 tombstone → 멱등 반환
@@ -365,15 +368,17 @@ def candidate_set_expired(
 
     # 문자열 → datetime 파싱
     from datetime import datetime
+
     if isinstance(cs_expires, str):
         cs_expires_dt = datetime.fromisoformat(cs_expires.replace("Z", "+00:00"))
         if cs_expires_dt.tzinfo is None:
             from zoneinfo import ZoneInfo
+
             cs_expires_dt = cs_expires_dt.replace(tzinfo=ZoneInfo("Asia/Seoul"))
     else:
         cs_expires_dt = cs_expires
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cs_expires_dt = _ensure_aware_utc(cs_expires_dt)
     return cs_expires_dt <= now
 
@@ -406,7 +411,9 @@ def hard_delete_if_eligible(
         return False
 
     tombstone_since = _ensure_aware_utc(tombstone_since)
-    eligible = datetime.now(timezone.utc) - tombstone_since >= __import__("datetime").timedelta(hours=tombstone_age_hours)
+    eligible = datetime.now(UTC) - tombstone_since >= __import__("datetime").timedelta(
+        hours=tombstone_age_hours
+    )
     if not eligible:
         return False
 

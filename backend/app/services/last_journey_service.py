@@ -8,20 +8,17 @@ User Story 2: 사용자가 막차 귀가를 요청하면,
 """
 
 import logging
-from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from app.schemas.errors import ErrorCode
 from app.schemas.journeys import (
-    TripRequest,
+    Comparison,
     Plan,
     PlanSummary,
-    Comparison,
-    RouteOption,
-    RouteLeg,
+    TripRequest,
 )
-from app.schemas.errors import ErrorCode
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
+from app.services.provider_interfaces import RoutingProvider
 from app.services.time_calculation import ensure_seoul, safe_add_minutes
 
 logger = logging.getLogger(__name__)
@@ -32,9 +29,13 @@ SEOUL_TZ = ZoneInfo("Asia/Seoul")
 # 막차 서비스 오류
 # ─────────────────────────────────────────────
 
+
 class LastJourneyUnsupportedError(Exception):
     """막차 운행 정보 미지원 오류."""
-    def __init__(self, message: str = "막차 운행 정보를 제공하는 데이터 제공자가 없습니다."):
+
+    def __init__(
+        self, message: str = "막차 운행 정보를 제공하는 데이터 제공자가 없습니다."
+    ):
         self.message = message
         self.error_code = ErrorCode.VALIDATION_ERROR
         self.status_code = 422
@@ -43,7 +44,10 @@ class LastJourneyUnsupportedError(Exception):
 
 class NoFeasibleJourneyError(Exception):
     """지원 범위에서 경로 없음 오류."""
-    def __init__(self, message: str = "막차 운행 시간대에 이용 가능한 경로가 없습니다."):
+
+    def __init__(
+        self, message: str = "막차 운행 시간대에 이용 가능한 경로가 없습니다."
+    ):
         self.message = message
         self.error_code = ErrorCode.VALIDATION_ERROR
         self.status_code = 422
@@ -53,6 +57,7 @@ class NoFeasibleJourneyError(Exception):
 # ─────────────────────────────────────────────
 # 막차 서비스
 # ─────────────────────────────────────────────
+
 
 class LastJourneyService:
     """막차 귀가 경로 계산 서비스.
@@ -118,12 +123,20 @@ class LastJourneyService:
 
         # 막차 운행 시간: 보통 23:00~00:30 사이 (자정 경계)
         # 막차 출발 시각: 23:00 ~ 23:30 사이 (가정)
-        last_departure_start = now_seoul.replace(hour=23, minute=0, second=0, microsecond=0)
-        last_departure_end = now_seoul.replace(hour=23, minute=30, second=0, microsecond=0)
+        last_departure_start = now_seoul.replace(
+            hour=23, minute=0, second=0, microsecond=0
+        )
+        last_departure_end = now_seoul.replace(
+            hour=23, minute=30, second=0, microsecond=0
+        )
 
         # 도착 마감 시한이 막차 시간대에 가능한지 확인
         # arrival_deadline이 자정 이후여야 막차 의미가 있음
-        arrival_deadline = ensure_seoul(request.arrival_deadline) if request.arrival_deadline else now_seoul + timedelta(hours=1)
+        arrival_deadline = (
+            ensure_seoul(request.arrival_deadline)
+            if request.arrival_deadline
+            else now_seoul + timedelta(hours=1)
+        )
 
         # 3. 막차 경로 후보 계산
         # Mock 제공자 사용: 교통수단 필터 없이 검색
@@ -136,7 +149,7 @@ class LastJourneyService:
             max_options=request.max_options or 3,
         )
 
-        options_data: List[dict] = []
+        options_data: list[dict] = []
         if routing_result.ok and routing_result.data:
             options_data = routing_result.data
 
@@ -149,12 +162,14 @@ class LastJourneyService:
             )
 
         # 5. 후보 경로 중 자정 이후 도착하는 경로 선택
-        candidate_options = options_data[:request.max_options or 3]
-        last_journey_options: List[dict] = []
+        candidate_options = options_data[: request.max_options or 3]
+        last_journey_options: list[dict] = []
 
         for opt_data in candidate_options:
             # 도착 시각 계산 (출발 + 소요시간)
-            departure_str = opt_data.get("departure_at") or last_departure_start.isoformat()
+            departure_str = (
+                opt_data.get("departure_at") or last_departure_start.isoformat()
+            )
             departure = ensure_seoul(datetime.fromisoformat(departure_str))
             duration = opt_data.get("total_duration_minutes", 0) or 0
             arrival = safe_add_minutes(departure, duration)
@@ -177,9 +192,11 @@ class LastJourneyService:
             )
 
         # 6. Plan 생성
-        target_arrival = arrival_deadline - timedelta(minutes=request.arrival_preference_minutes or 0)
+        target_arrival = arrival_deadline - timedelta(
+            minutes=request.arrival_preference_minutes or 0
+        )
 
-        plan_summaries: List[PlanSummary] = []
+        plan_summaries: list[PlanSummary] = []
         selected_option_id = None
 
         for idx, opt_data in enumerate(last_journey_options):
@@ -187,7 +204,9 @@ class LastJourneyService:
             option_id = opt_data.get("option_id", f"opt_last_{idx}")
 
             # 권장 출발시각 = target_arrival - total_duration - buffer
-            recommended_leave = target_arrival - timedelta(minutes=total_duration + buffer_minutes)
+            recommended_leave = target_arrival - timedelta(
+                minutes=total_duration + buffer_minutes
+            )
 
             reasoning = (
                 f"막차 귀가 경로: {opt_data.get('transport_mode', 'subway')} 이용. "
@@ -221,13 +240,16 @@ class LastJourneyService:
             destination_place_id=request.destination_place_id,
             arrival_deadline=arrival_deadline,
             target_arrival_at=target_arrival,
-            recommended_leave_at=target_arrival - timedelta(minutes=total_duration + buffer_minutes),
+            recommended_leave_at=target_arrival
+            - timedelta(minutes=total_duration + buffer_minutes),
             total_duration_minutes=total_duration,
             transport_mode=transport_mode,
             comparison=Comparison(
                 options=plan_summaries,
                 selected_option_id=selected_option_id,
-                comparison_reason="막차 귀가 후보 경로 비교" if len(plan_summaries) > 1 else "막차 귀가 단일 경로",
+                comparison_reason="막차 귀가 후보 경로 비교"
+                if len(plan_summaries) > 1
+                else "막차 귀가 단일 경로",
             ),
             buffer_applied=buffer_minutes,
             notes=(

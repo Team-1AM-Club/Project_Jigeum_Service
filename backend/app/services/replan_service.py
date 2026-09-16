@@ -8,23 +8,16 @@ User Story 3: 사용자가 놓침·변경 후 재탐색을 요청하면,
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import uuid
 
 from app.schemas.journeys import (
-    TripRequest,
-    Plan,
-    PlanSummary,
-    Comparison,
+    ReplanComparison,
     ReplanRequest,
     ReplanResponse,
-    ReplanComparison,
-    ReplanReason,
+    TripRequest,
 )
-from app.schemas.errors import ErrorCode
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
 from app.services.plan_service import PlanService
 from app.services.time_calculation import ensure_seoul
 
@@ -35,6 +28,7 @@ SEOUL_TZ = ZoneInfo("Asia/Seoul")
 # ─────────────────────────────────────────────
 # 재탐색 서비스
 # ─────────────────────────────────────────────
+
 
 class ReplanService:
     """재탐색 서비스.
@@ -77,14 +71,18 @@ class ReplanService:
             raise ValueError("origin_place_id가 필요합니다")
 
         if not request.user_confirmed:
-            raise ValueError("사용자 확인이 필요합니다. user_confirmed=true로 재요청하세요.")
+            raise ValueError(
+                "사용자 확인이 필요합니다. user_confirmed=true로 재요청하세요."
+            )
 
         # 2. 현재 서버 시각 기준 새 경로 계산
         now_seoul = datetime.now(SEOUL_TZ)
 
         # 재탐색용 TripRequest 생성
         # current_origin_place_id가 있으면 이를 출발지로 사용, 없으면 trip의 origin 사용
-        origin_id = request.current_origin_place_id or request.trip.get("origin_place_id")
+        origin_id = request.current_origin_place_id or request.trip.get(
+            "origin_place_id"
+        )
         dest_id = request.trip.get("destination_place_id")
 
         if not origin_id:
@@ -113,7 +111,11 @@ class ReplanService:
             origin_place_id=origin_id,
             destination_place_id=dest_id,
             arrival_deadline=arrival_deadline,
-            arrival_preference_minutes=request.previous_plan.get("arrival_preference_minutes", 10) if request.previous_plan else 10,
+            arrival_preference_minutes=request.previous_plan.get(
+                "arrival_preference_minutes", 10
+            )
+            if request.previous_plan
+            else 10,
             transport_mode=request.trip.get("transport_mode"),
             max_options=request.max_options or 3,
         )
@@ -136,7 +138,9 @@ class ReplanService:
                 try:
                     prev_target = ensure_seoul(datetime.fromisoformat(prev_target_str))
                     new_target = ensure_seoul(new_plan.target_arrival_at)
-                    arrival_change_minutes = int((new_target - prev_target).total_seconds() / 60)
+                    arrival_change_minutes = int(
+                        (new_target - prev_target).total_seconds() / 60
+                    )
                 except (ValueError, TypeError):
                     pass
 
@@ -144,7 +148,9 @@ class ReplanService:
                 try:
                     prev_leave = ensure_seoul(datetime.fromisoformat(prev_leave_str))
                     new_leave = ensure_seoul(new_plan.recommended_leave_at)
-                    leave_change_minutes = int((new_leave - prev_leave).total_seconds() / 60)
+                    leave_change_minutes = int(
+                        (new_leave - prev_leave).total_seconds() / 60
+                    )
                 except (ValueError, TypeError):
                     pass
 
@@ -165,9 +171,13 @@ class ReplanService:
         notes_parts = []
         if arrival_change_minutes is not None:
             if arrival_change_minutes > 0:
-                notes_parts.append(f"이전 계획 대비 {arrival_change_minutes}분 늦게 도착합니다.")
+                notes_parts.append(
+                    f"이전 계획 대비 {arrival_change_minutes}분 늦게 도착합니다."
+                )
             elif arrival_change_minutes < 0:
-                notes_parts.append(f"이전 계획 대비 {abs(arrival_change_minutes)}분 일찍 도착합니다.")
+                notes_parts.append(
+                    f"이전 계획 대비 {abs(arrival_change_minutes)}분 일찍 도착합니다."
+                )
             else:
                 notes_parts.append("이전 계획과 도착 시각이 동일합니다.")
 
@@ -175,7 +185,9 @@ class ReplanService:
             if leave_change_minutes > 0:
                 notes_parts.append(f"출발 시각도 {leave_change_minutes}분 늦어집니다.")
             elif leave_change_minutes < 0:
-                notes_parts.append(f"출발 시각도 {abs(leave_change_minutes)}분 앞당겨집니다.")
+                notes_parts.append(
+                    f"출발 시각도 {abs(leave_change_minutes)}분 앞당겨집니다."
+                )
 
         notes = " ".join(notes_parts) if notes_parts else "재탐색이 완료되었습니다."
 
@@ -218,7 +230,9 @@ class ReplanService:
 
         # 간단한 가용성 확인
         try:
-            origin_id = request.current_origin_place_id or request.trip.get("origin_place_id")
+            origin_id = request.current_origin_place_id or request.trip.get(
+                "origin_place_id"
+            )
             dest_id = request.trip.get("destination_place_id")
 
             result = await self.plan_service.routing_provider.search_options(

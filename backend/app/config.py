@@ -1,7 +1,9 @@
 """앱 설정. 환경 변수 검증 포함."""
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from functools import lru_cache
+
 from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -25,6 +27,7 @@ class Settings(BaseSettings):
     def validate_secret_key(cls, v: str) -> str:
         if v == "change-me-in-production":
             import warnings
+
             warnings.warn(
                 "secret_key가 기본값입니다. 프로덕션에서는 반드시 변경하세요.",
                 RuntimeWarning,
@@ -51,9 +54,12 @@ def get_settings() -> Settings:
 
 # 모듈 레벨 검증: import 시점에 필수 설정 확인
 _settings = get_settings()
-if _settings.secret_key == "change-me-in-production" and _settings.environment == "production":
-    import sys
+if (
+    _settings.secret_key == "change-me-in-production"
+    and _settings.environment == "production"
+):
     import warnings
+
     warnings.warn(
         "프로덕션 환경에서 secret_key가 기본값입니다. 서버를 중단하지 않지만 경고합니다.",
         RuntimeWarning,
