@@ -29,7 +29,7 @@ cp .env.example .env
 ### 서버 실행
 
 ```bash
-uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 - API 문서: http://127.0.0.1:8000/docs
@@ -75,21 +75,28 @@ backend/
 
 ## 테스트 실행
 
+아래 명령은 `backend` 디렉터리에서 실행한다. 저장소에 남아 있는
+`.test_venv_fresh`는 사용하지 않는다. 이번 검증은 저장소 밖 전용 환경에서 수행했다.
+서버는 시작 시 SQLite 테이블과 확인 상태용 신규 컬럼을 생성한다.
+기존 행의 확인 플래그는 false이며 다시 interpret → confirm 절차를 거쳐야 한다.
+대화 만료 정리는 시작 시 및 60초마다 실행하며, 요청 시에도 만료를 검사한다.
+실제 provider·Hermes·Solar·배포 검증은 포함하지 않는다. 모든 응답은 demo다.
+
 ```bash
 # 전체 테스트
-pytest backend/tests/ -v
+python -m pytest tests/ -v
 
 # 단위 테스트만
-pytest backend/tests/unit/ -v
+python -m pytest tests/unit/ -v
 
 # 계약 테스트만
-pytest backend/tests/contract/ -v
+python -m pytest tests/contract/ -v
 
 # 통합 테스트만
-pytest backend/tests/integration/ -v
+python -m pytest tests/integration/ -v
 
 # 특정 테스트 파일
-pytest backend/tests/unit/test_plan_service.py -v
+python -m pytest tests/unit/test_plan_service.py -v
 ```
 
 ### 커버리지 측정

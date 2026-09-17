@@ -1,0 +1,145 @@
+diff --git a/backend/app/config.py b/backend/app/config.py
+--- a/backend/app/config.py
++++ b/backend/app/config.py
+@@ -1,8 +1,9 @@
+ """앱 설정. 환경 변수 검증 포함."""
+ 
+ from functools import lru_cache
++from pathlib import Path
+ 
+-from pydantic import field_validator
++from pydantic import Field, SecretStr, field_validator
+ from pydantic_settings import BaseSettings, SettingsConfigDict
+ 
+ 
+@@ -20,7 +21,38 @@
+     model_provider_api_key: str = ""
+     openai_compatibility_mode: bool = False
+ 
+-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
++    seoul_subway_arrival_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_subway_position_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_subway_stations_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_subway_timetable_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_subway_last_train_api_key: SecretStr = Field(
++        default=SecretStr(""), repr=False
++    )
++    seoul_subway_path_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_bus_stations_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_bus_routes_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_bus_positions_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++    seoul_bus_arrivals_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
++
++    model_config = SettingsConfigDict(
++        env_file=".env", env_file_encoding="utf-8", hide_input_in_errors=True
++    )
++
++    @classmethod
++    def from_transit_file(
++        cls,
++        path: Path | None = None,
++        *,
++        env_file: str | Path | None = ".env",
++    ) -> "Settings":
++        """운영자 명시 실행에서만 로컬 교통 파일을 읽는다. 환경변수가 우선한다."""
++        transit_path = (
++            path or Path(__file__).resolve().parents[1] / ".env.transit.local"
++        )
++        if not transit_path.is_absolute():
++            raise ValueError("교통 설정 파일은 절대 경로여야 합니다.")
++        files = (env_file, transit_path) if env_file is not None else (transit_path,)
++        return cls(_env_file=files)
+ 
+     @field_validator("secret_key")
+     @classmethod
+diff --git a/backend/app/main.py b/backend/app/main.py
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -1,9 +1,12 @@
++from contextlib import asynccontextmanager
+ from uuid import UUID
+ from zoneinfo import ZoneInfo
+ 
++import httpx
+ from fastapi import FastAPI, Header, HTTPException, Request
+ from fastapi.exceptions import RequestValidationError
+ from fastapi.middleware.cors import CORSMiddleware
++from fastapi.responses import JSONResponse
+ 
+ from app.api.capabilities import router as capabilities_router
+ from app.api.health import router as health_router
+@@ -11,25 +14,35 @@
+ from app.api.mobility import router as mobility_router
+ from app.api.places import router as places_router
+ from app.config import get_settings
++from app.lifecycle import lifespan as database_lifespan
++from app.services.http_state import StateError, envelope
++from app.services.provider_client import ProviderClient
+ 
+ settings = get_settings()
+-from fastapi.responses import JSONResponse
+-
+-from app.lifecycle import lifespan
+-from app.services.http_state import StateError, envelope
+-
+ SEOUL_TZ = ZoneInfo("Asia/Seoul")
+ 
++
++@asynccontextmanager
++async def lifespan(application: FastAPI):
++    """HTTP 연결 자원은 앱 수명 동안 공유하고 종료 시 해제한다."""
++    async with httpx.AsyncClient(
++        follow_redirects=False, trust_env=False
++    ) as http_client:
++        application.state.provider_http_client = http_client
++        application.state.provider_client = ProviderClient(http_client=http_client)
++        async with database_lifespan(application):
++            yield
++
++
+ app = FastAPI(
+-    lifespan=lifespan,
+     title="Jigeum API",
+     version=settings.api_version,
+     docs_url="/docs",
+     openapi_url="/openapi.json",
++    lifespan=lifespan,
+ )
+ 
+ 
+-# CORS
+ @app.exception_handler(StateError)
+ async def state_error_handler(request: Request, exc: StateError):
+     return JSONResponse(
+diff --git a/backend/.dockerignore b/backend/.dockerignore
+--- a/backend/.dockerignore
++++ b/backend/.dockerignore
+@@ -3,3 +3,28 @@
+ .env.*
+ **/.env
+ **/.env.*
++
++# 로컬 실행 환경과 테스트 산출물
++.venv
++venv
++.test_venv*
++**/.venv
++**/venv
++**/.test_venv*
++**/__pycache__
++**/.pytest_cache
++**/.mypy_cache
++**/.ruff_cache
++**/*.pyc
++**/*.db
++**/*.sqlite
++**/*.sqlite3
++.git
++.codex
++.agents
++**/*credentials*.json
++**/*service-account*.json
++**/*.pem
++**/*.key
++**/*.p12
++**/*.log

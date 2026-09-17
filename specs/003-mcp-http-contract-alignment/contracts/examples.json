@@ -1,0 +1,2262 @@
+{
+  "proposal_version": "003-review-2",
+  "status": "review_only_not_shared_contract",
+  "description": "독립 실행용 계약 fixture 제안. 전부 가상 데이터이며 실제 교통·Hermes 실행 증거가 아니다. path는 /api/v1을 제외한 suffix다. 각 case의 preconditions를 별도로 구성하고 server_time을 동결한다. 과거 시각 fixture를 실제 교통 조회에 사용하지 않는다.",
+  "source_domain_fixture": "../../../Docs/api/examples.json",
+  "fault_scenarios": [
+    {
+      "id": "post_committed_first_response_invalid",
+      "kind": "mcp_transport_fault_injection_not_valid_backend_envelope",
+      "base_cases": ["confirm", "plan", "select", "replan", "select_replan"],
+      "variants": ["invalid_json", "missing_required_schema_field", "mismatched_idempotency_header", "invalid_http_status_envelope_combination"],
+      "steps": [
+        "각 base case를 독립 구성하고 원래 POST의 키·직렬화 body·revision·시각 값을 보존한다.",
+        "서버 commit 뒤 최초 HTTP 응답에 variant 하나를 주입한다. 서버 저장 응답 자체는 변경하지 않는다.",
+        "GET은 허용하고 새 상태 변경은 차단하는지 확인한다.",
+        "직접 elicitation 승인으로 resume POST 1회를 원래 요청 그대로 전송한다.",
+        "유효한 최초 성공 replay를 받고 중복 적용이 없는지 확인한다."
+      ],
+      "expected": {
+        "automatic_additional_attempts": 0,
+        "primary_tool_error": "OUTCOME_UNKNOWN",
+        "cause_classification": "UPSTREAM_RESPONSE_INVALID",
+        "diagnostic_wire_field_status": "T001에서 diagnostics.cause_code 권장안 검토; 아직 미확정",
+        "new_mutation_error": "REQUEST_PENDING",
+        "same_key_body_revision_timestamps": true,
+        "total_successful_state_applications": 1,
+        "retry_budget_reset": false
+      }
+    },
+    {
+      "id": "invalid_get_does_not_create_mutation_pending",
+      "kind": "mcp_transport_fault_injection_not_valid_backend_envelope",
+      "base_cases": ["state"],
+      "steps": ["보류 없음/기존 보류 있음의 두 상태에서 GET 응답을 파손한다."],
+      "expected": {
+        "tool_error": "UPSTREAM_RESPONSE_INVALID",
+        "automatic_additional_attempts": 0,
+        "creates_new_mutation_pending": false,
+        "clears_existing_pending": false
+      }
+    },
+    {
+      "id": "pending_old_replay_after_newer_get",
+      "kind": "mcp_recovery_sequence",
+      "base_cases": ["plan_replay_after_selection", "state", "conversation_expired_replay"],
+      "steps": [
+        "plan commit 뒤 최초 응답을 파손하여 보류한다.",
+        "테스트 준비 단계에서 서버의 후속 선택을 구성하고 GET으로 revision 4를 관측한다. 보류 중 MCP의 새 변경이 허용됐다는 뜻이 아니다.",
+        "원래 plan 요청을 승인 resume하여 revision 3 replay를 받는다.",
+        "별도 만료 variant는 복구 전에 대화를 만료시켜 과거 결과를 복원하지 않음을 확인한다."
+      ],
+      "expected": {
+        "get_alone_resolves_pending": false,
+        "max_observed_revision_after_replay": 4,
+        "expired_result_restored": false,
+        "expiration_proves_prior_non_application": false
+      }
+    },
+    {
+      "id": "server_deadline_boundaries",
+      "kind": "controlled_monotonic_clock_scenario",
+      "budgets_seconds": {"health": 3, "capabilities": 3, "places": 10, "interpret": 25, "plan": 25, "replan": 25},
+      "variants": ["just_before", "exact_deadline", "after_deadline", "provider_late_success", "response_delayed_after_commit"],
+      "steps": [
+        "핸들러 진입부터 결과 검증·원자 확정까지 단조 경과시간을 제어한다. 각 provider 호출은 남은 전체 예산을 공유한다.",
+        "정상 조건·결과에서 제한 직전은 성공 가능, 동일·초과는 미확정 결과의 새 commit을 거부한다.",
+        "취소 뒤 늦은 provider 결과를 도착시켜 새 상태 적용이 없는지 확인한다.",
+        "confirm 성공 후 plan timeout은 plan 직전 상태와 비교하고 독립적인 자연 만료는 구별한다.",
+        "제한 안에 commit한 뒤 응답만 지연시킨 variant는 같은 키 replay로 회수한다."
+      ],
+      "expected": {
+        "uncommitted_timeout_state_revision_updated_at_ttl_updates": 0,
+        "late_commit_after_timeout": 0,
+        "committed_success_record_preserved": true,
+        "duplicate_state_applications": 0,
+        "timeout_wire_error_status": "REQUEST_TIMEOUT 권장안은 T001 합의 전 미확정"
+      }
+    }
+  ],
+  "proposed_error_examples": [
+    {
+      "id": "valid_provider_invalid_response_error",
+      "status": "review_only_not_shared_contract",
+      "kind": "valid_backend_error_envelope",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_case": "plan",
+      "precondition": "provider 응답 불량으로 plan 미적용을 보장한다. 원래 요청 키를 반향한다.",
+      "response_http_status": 502,
+      "response_headers": {"Idempotency-Key": "00000000-0000-4000-8000-000000000003"},
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {"code": "UPSTREAM_RESPONSE_INVALID", "message": "제공처 응답 형식을 확인할 수 없습니다.", "retryable": false, "details": []},
+        "meta": {"request_id": "proposal-provider-invalid", "server_time": "2026-09-13T18:00:01+09:00", "api_version": "v1", "is_demo": true, "conversation_id": "11111111-1111-4111-8111-111111111111", "revision": 2, "expires_at": "2026-09-13T20:00:00+09:00"}
+      },
+      "expected": {"automatic_additional_attempts": 0, "new_state_applications": 0, "outcome_unknown": false}
+    },
+    {
+      "id": "request_timeout_error_proposal",
+      "status": "pending_T001_joint_agreement",
+      "kind": "proposed_valid_backend_error_envelope",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_case": "plan",
+      "precondition": "서버 전체 25초 예산이 소진됐고 해당 plan의 미적용과 늦은 commit 차단을 보장한다.",
+      "response_http_status": 504,
+      "response_headers": {"Idempotency-Key": "00000000-0000-4000-8000-000000000003"},
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {"code": "REQUEST_TIMEOUT", "message": "요청 처리 제한시간을 초과했습니다.", "retryable": true, "details": []},
+        "meta": {"request_id": "proposal-request-timeout", "server_time": "2026-09-13T18:00:25+09:00", "api_version": "v1", "is_demo": true, "conversation_id": "11111111-1111-4111-8111-111111111111", "revision": 2, "expires_at": "2026-09-13T20:00:00+09:00"}
+      },
+      "expected": {"new_state_applications": 0, "maximum_automatic_additional_attempts": 1, "retry_delay_ms": 500, "same_key_body_revision": true}
+    }
+  ],
+  "cases": [
+    {
+      "id": "initial_ready",
+      "description": "최초 해석으로 서버 대화를 1회 생성한다.",
+      "preconditions": [
+        "키 미등록. 기존 대화 없음. 서버 시각 고정."
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/mobility/interpret",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000001"
+      },
+      "request_body": {
+        "text": "이동 조건을 정리해줘.",
+        "reference_time": "2026-09-13T18:00:00+09:00",
+        "timezone": "Asia/Seoul",
+        "context": {
+          "kind": "appointment",
+          "origin": {
+            "query": "테스트 A역 1번 출구",
+            "place": {
+              "place_id": "fixture:place-a",
+              "name": "테스트 A역 1번 출구",
+              "address": "서울 내 가상 출발 지점",
+              "latitude": 37.5,
+              "longitude": 126.95
+            },
+            "confirmed": true
+          },
+          "destination": {
+            "query": "테스트 B역 2번 출구",
+            "place": {
+              "place_id": "fixture:place-b",
+              "name": "테스트 B역 2번 출구",
+              "address": "서울 내 가상 도착 지점",
+              "latitude": 37.51,
+              "longitude": 127.02
+            },
+            "confirmed": true
+          },
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ],
+          "ambiguities": []
+        },
+        "request_started_at": "2026-09-13T18:00:00+09:00"
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000001"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "draft": {
+            "kind": "appointment",
+            "origin": {
+              "query": "테스트 A역 1번 출구",
+              "place": {
+                "place_id": "fixture:place-a",
+                "name": "테스트 A역 1번 출구",
+                "address": "서울 내 가상 출발 지점",
+                "latitude": 37.5,
+                "longitude": 126.95
+              },
+              "confirmed": true
+            },
+            "destination": {
+              "query": "테스트 B역 2번 출구",
+              "place": {
+                "place_id": "fixture:place-b",
+                "name": "테스트 B역 2번 출구",
+                "address": "서울 내 가상 도착 지점",
+                "latitude": 37.51,
+                "longitude": 127.02
+              },
+              "confirmed": true
+            },
+            "arrival_deadline": "2026-09-13T19:00:00+09:00",
+            "arrival_preference_minutes": 10,
+            "service_date": null,
+            "transport_modes": [
+              "subway",
+              "bus"
+            ],
+            "ambiguities": []
+          },
+          "ready_for_plan": true,
+          "missing_fields": [],
+          "questions": [],
+          "applied_defaults": [],
+          "summary": "오늘 19:00까지 테스트 B역 2번 출구 도착, 10분 전 도착 선호",
+          "draft_revision": 1,
+          "conditions_hash": "8602710d737d3cebf910486efefeb8739174c97982694f616c570ed556a5c829"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-initial-ready",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 1,
+          "expires_at": "2026-09-13T18:30:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "confirm",
+      "description": "초안과 실제 승인 응답을 결부한 확인 요청.",
+      "preconditions": [
+        "initial_ready 성공",
+        "가짜 elicitation accept + approve=true. 실제 사람 실행 증거가 아님."
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/conversations/11111111-1111-4111-8111-111111111111/confirm",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000002"
+      },
+      "request_body": {
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 1,
+        "draft_revision": 1,
+        "conditions_hash": "8602710d737d3cebf910486efefeb8739174c97982694f616c570ed556a5c829",
+        "evidence": {
+          "source": "mcp_elicitation",
+          "interaction_id": "00000000-0000-4000-8000-000000000102",
+          "accepted_at": "2026-09-13T18:00:00+09:00"
+        }
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000002"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "confirmation_id": "confirmation-a",
+          "conditions_hash": "8602710d737d3cebf910486efefeb8739174c97982694f616c570ed556a5c829",
+          "confirmed_revision": 2,
+          "confirmed_until": "2026-09-13T20:00:00+09:00"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-confirm",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 2,
+          "expires_at": "2026-09-13T20:00:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "plan",
+      "description": "확인된 조건으로 후보를 만들고 아직 선택하지 않는다.",
+      "preconditions": [
+        "confirm 성공"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "plan": {
+            "plan_id": "plan-fixture-1",
+            "generated_at": "2026-09-13T18:00:00+09:00",
+            "refresh_after": "2026-09-13T18:05:00+09:00",
+            "trip": {
+              "kind": "appointment",
+              "origin_place_id": "fixture:place-a",
+              "destination_place_id": "fixture:place-b",
+              "arrival_deadline": "2026-09-13T19:00:00+09:00",
+              "arrival_preference_minutes": 10,
+              "service_date": null,
+              "transport_modes": [
+                "subway",
+                "bus"
+              ]
+            },
+            "origin": {
+              "place_id": "fixture:place-a",
+              "name": "테스트 A역 1번 출구",
+              "address": "서울 내 가상 출발 지점",
+              "latitude": 37.5,
+              "longitude": 126.95
+            },
+            "destination": {
+              "place_id": "fixture:place-b",
+              "name": "테스트 B역 2번 출구",
+              "address": "서울 내 가상 도착 지점",
+              "latitude": 37.51,
+              "longitude": 127.02
+            },
+            "target_arrival_at": "2026-09-13T18:50:00+09:00",
+            "recommended_option_id": "option-a",
+            "options": [
+              {
+                "option_id": "option-a",
+                "summary": "가상 노선 A 이용 · 도보 10분",
+                "recommended_leave_at": "2026-09-13T18:10:00+09:00",
+                "hard_leave_at": null,
+                "estimated_arrival_at": "2026-09-13T18:50:00+09:00",
+                "total_duration_minutes": 40,
+                "buffer": {
+                  "policy_version": "demo-v1",
+                  "total_minutes": 5,
+                  "items": [
+                    {
+                      "code": "BOARDING_MARGIN",
+                      "minutes": 5,
+                      "leg_id": "option-a-leg-2",
+                      "reason": "시연용 탑승 여유 5분"
+                    }
+                  ]
+                },
+                "arrival_status": "on_time",
+                "late_by_minutes": 0,
+                "target_margin_minutes": 0,
+                "legs": [
+                  {
+                    "leg_id": "option-a-leg-1",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 A역 1번 출구",
+                      "latitude": 37.5,
+                      "longitude": 126.95
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-13T18:10:00+09:00",
+                    "arrival_at": "2026-09-13T18:15:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-a-leg-2",
+                    "mode": "wait",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-13T18:15:00+09:00",
+                    "arrival_at": "2026-09-13T18:20:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": "safety_buffer"
+                  },
+                  {
+                    "leg_id": "option-a-leg-3",
+                    "mode": "subway",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "departure_at": "2026-09-13T18:20:00+09:00",
+                    "arrival_at": "2026-09-13T18:45:00+09:00",
+                    "duration_minutes": 25,
+                    "transit": {
+                      "line_name": "가상 노선 A",
+                      "direction": "테스트 B역 방향",
+                      "headsign": "테스트 B역",
+                      "service_id": "fixture-service-a"
+                    },
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-a-leg-4",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "to": {
+                      "name": "테스트 B역 2번 출구",
+                      "latitude": 37.51,
+                      "longitude": 127.02
+                    },
+                    "departure_at": "2026-09-13T18:45:00+09:00",
+                    "arrival_at": "2026-09-13T18:50:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  }
+                ],
+                "calculation_method": "schedule_search",
+                "sources": [
+                  {
+                    "provider": "fixture",
+                    "basis": "demo",
+                    "retrieved_at": "2026-09-13T18:00:00+09:00",
+                    "service_date": "2026-09-13"
+                  }
+                ],
+                "warnings": [
+                  {
+                    "code": "DEMO_DATA",
+                    "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다."
+                  }
+                ],
+                "navigation_url": null
+              }
+            ]
+          },
+          "candidate_set_id": "candidate-a",
+          "candidate_expires_at": "2026-09-13T18:05:00+09:00"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-plan",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 3,
+          "expires_at": "2026-09-13T20:00:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "select",
+      "description": "사용자의 직접 선택으로만 현재 선택을 바꾼다.",
+      "preconditions": [
+        "plan 성공",
+        "가짜 elicitation accept + option_id=option-a"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/conversations/11111111-1111-4111-8111-111111111111/select",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000004"
+      },
+      "request_body": {
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 3,
+        "candidate_set_id": "candidate-a",
+        "option_id": "option-a",
+        "evidence": {
+          "source": "mcp_elicitation",
+          "interaction_id": "00000000-0000-4000-8000-000000000104",
+          "accepted_at": "2026-09-13T18:00:00+09:00"
+        }
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000004"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "selected_plan_id": "plan-fixture-1",
+          "selected_option_id": "option-a",
+          "candidate_set_id": "candidate-a",
+          "selected_at": "2026-09-13T18:00:00+09:00",
+          "selected_until": "2026-09-13T20:50:00+09:00"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-select",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 4,
+          "expires_at": "2026-09-13T20:50:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "state",
+      "description": "선택 후 서버 상태 조회. revision과 수명을 변경하지 않는다.",
+      "preconditions": [
+        "select 성공"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "GET",
+      "path": "/conversations/11111111-1111-4111-8111-111111111111",
+      "request_headers": {
+        "Accept": "application/json"
+      },
+      "request_body": null,
+      "response_http_status": 200,
+      "response_headers": {},
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "draft": null,
+          "confirmation": {
+            "confirmation_id": "confirmation-a",
+            "conditions_hash": "8602710d737d3cebf910486efefeb8739174c97982694f616c570ed556a5c829",
+            "confirmed_revision": 2,
+            "expires_at": "2026-09-13T20:00:00+09:00"
+          },
+          "confirmed_trip": {
+            "kind": "appointment",
+            "origin_place_id": "fixture:place-a",
+            "destination_place_id": "fixture:place-b",
+            "arrival_deadline": "2026-09-13T19:00:00+09:00",
+            "arrival_preference_minutes": 10,
+            "service_date": null,
+            "transport_modes": [
+              "subway",
+              "bus"
+            ]
+          },
+          "candidate_set": {
+            "candidate_set_id": "candidate-a",
+            "plan": {
+              "plan_id": "plan-fixture-1",
+              "generated_at": "2026-09-13T18:00:00+09:00",
+              "refresh_after": "2026-09-13T18:05:00+09:00",
+              "trip": {
+                "kind": "appointment",
+                "origin_place_id": "fixture:place-a",
+                "destination_place_id": "fixture:place-b",
+                "arrival_deadline": "2026-09-13T19:00:00+09:00",
+                "arrival_preference_minutes": 10,
+                "service_date": null,
+                "transport_modes": [
+                  "subway",
+                  "bus"
+                ]
+              },
+              "origin": {
+                "place_id": "fixture:place-a",
+                "name": "테스트 A역 1번 출구",
+                "address": "서울 내 가상 출발 지점",
+                "latitude": 37.5,
+                "longitude": 126.95
+              },
+              "destination": {
+                "place_id": "fixture:place-b",
+                "name": "테스트 B역 2번 출구",
+                "address": "서울 내 가상 도착 지점",
+                "latitude": 37.51,
+                "longitude": 127.02
+              },
+              "target_arrival_at": "2026-09-13T18:50:00+09:00",
+              "recommended_option_id": "option-a",
+              "options": [
+                {
+                  "option_id": "option-a",
+                  "summary": "가상 노선 A 이용 · 도보 10분",
+                  "recommended_leave_at": "2026-09-13T18:10:00+09:00",
+                  "hard_leave_at": null,
+                  "estimated_arrival_at": "2026-09-13T18:50:00+09:00",
+                  "total_duration_minutes": 40,
+                  "buffer": {
+                    "policy_version": "demo-v1",
+                    "total_minutes": 5,
+                    "items": [
+                      {
+                        "code": "BOARDING_MARGIN",
+                        "minutes": 5,
+                        "leg_id": "option-a-leg-2",
+                        "reason": "시연용 탑승 여유 5분"
+                      }
+                    ]
+                  },
+                  "arrival_status": "on_time",
+                  "late_by_minutes": 0,
+                  "target_margin_minutes": 0,
+                  "legs": [
+                    {
+                      "leg_id": "option-a-leg-1",
+                      "mode": "walk",
+                      "from": {
+                        "name": "테스트 A역 1번 출구",
+                        "latitude": 37.5,
+                        "longitude": 126.95
+                      },
+                      "to": {
+                        "name": "테スト A역 승강장",
+                        "latitude": 37.5001,
+                        "longitude": 126.9501
+                      },
+                      "departure_at": "2026-09-13T18:10:00+09:00",
+                      "arrival_at": "2026-09-13T18:15:00+09:00",
+                      "duration_minutes": 5,
+                      "transit": null,
+                      "wait_reason": null
+                    },
+                    {
+                      "leg_id": "option-a-leg-2",
+                      "mode": "wait",
+                      "from": {
+                        "name": "테スト A역 승강장",
+                        "latitude": 37.5001,
+                        "longitude": 126.9501
+                      },
+                      "to": {
+                        "name": "테スト A역 승강장",
+                        "latitude": 37.5001,
+                        "longitude": 126.9501
+                      },
+                      "departure_at": "2026-09-13T18:15:00+09:00",
+                      "arrival_at": "2026-09-13T18:20:00+09:00",
+                      "duration_minutes": 5,
+                      "transit": null,
+                      "wait_reason": "safety_buffer"
+                    },
+                    {
+                      "leg_id": "option-a-leg-3",
+                      "mode": "subway",
+                      "from": {
+                        "name": "테スト A역 승강장",
+                        "latitude": 37.5001,
+                        "longitude": 126.9501
+                      },
+                      "to": {
+                        "name": "테스트 B역 승강장",
+                        "latitude": 37.5101,
+                        "longitude": 127.0201
+                      },
+                      "departure_at": "2026-09-13T18:20:00+09:00",
+                      "arrival_at": "2026-09-13T18:45:00+09:00",
+                      "duration_minutes": 25,
+                      "transit": {
+                        "line_name": "가상 노선 A",
+                        "direction": "테스트 B역 방향",
+                        "headsign": "테스트 B역",
+                        "service_id": "fixture-service-a"
+                      },
+                      "wait_reason": null
+                    },
+                    {
+                      "leg_id": "option-a-leg-4",
+                      "mode": "walk",
+                      "from": {
+                        "name": "테스트 B역 승강장",
+                        "latitude": 37.5101,
+                        "longitude": 127.0201
+                      },
+                      "to": {
+                        "name": "테스트 B역 2번 출구",
+                        "latitude": 37.51,
+                        "longitude": 127.02
+                      },
+                      "departure_at": "2026-09-13T18:45:00+09:00",
+                      "arrival_at": "2026-09-13T18:50:00+09:00",
+                      "duration_minutes": 5,
+                      "transit": null,
+                      "wait_reason": null
+                    }
+                  ],
+                  "calculation_method": "schedule_search",
+                  "sources": [
+                    {
+                      "provider": "fixture",
+                      "basis": "demo",
+                      "retrieved_at": "2026-09-13T18:00:00+09:00",
+                      "service_date": "2026-09-13"
+                    }
+                  ],
+                  "warnings": [
+                    {
+                      "code": "DEMO_DATA",
+                      "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다."
+                    }
+                  ],
+                  "navigation_url": null
+                }
+              ]
+            },
+            "conditions_hash": "8602710d737d3cebf910486efefeb8739174c97982694f616c570ed556a5c829",
+            "expires_at": "2026-09-13T18:05:00+09:00"
+          },
+          "active_selected_plan": {
+            "plan_id": "plan-fixture-1",
+            "option_id": "option-a",
+            "trip": {
+              "kind": "appointment",
+              "origin_place_id": "fixture:place-a",
+              "destination_place_id": "fixture:place-b",
+              "arrival_deadline": "2026-09-13T19:00:00+09:00",
+              "arrival_preference_minutes": 10,
+              "service_date": null,
+              "transport_modes": [
+                "subway",
+                "bus"
+              ]
+            },
+            "option": {
+              "option_id": "option-a",
+              "summary": "가상 노선 A 이용 · 도보 10분",
+              "recommended_leave_at": "2026-09-13T18:10:00+09:00",
+              "hard_leave_at": null,
+              "estimated_arrival_at": "2026-09-13T18:50:00+09:00",
+              "total_duration_minutes": 40,
+              "buffer": {
+                "policy_version": "demo-v1",
+                "total_minutes": 5,
+                "items": [
+                  {
+                    "code": "BOARDING_MARGIN",
+                    "minutes": 5,
+                    "leg_id": "option-a-leg-2",
+                    "reason": "시연용 탑승 여유 5분"
+                  }
+                ]
+              },
+              "arrival_status": "on_time",
+              "late_by_minutes": 0,
+              "target_margin_minutes": 0,
+              "legs": [
+                {
+                  "leg_id": "option-a-leg-1",
+                  "mode": "walk",
+                  "from": {
+                    "name": "테스트 A역 1번 출구",
+                    "latitude": 37.5,
+                    "longitude": 126.95
+                  },
+                  "to": {
+                    "name": "테スト A역 승강장",
+                    "latitude": 37.5001,
+                    "longitude": 126.9501
+                  },
+                  "departure_at": "2026-09-13T18:10:00+09:00",
+                  "arrival_at": "2026-09-13T18:15:00+09:00",
+                  "duration_minutes": 5,
+                  "transit": null,
+                  "wait_reason": null
+                },
+                {
+                  "leg_id": "option-a-leg-2",
+                  "mode": "wait",
+                  "from": {
+                    "name": "테スト A역 승강장",
+                    "latitude": 37.5001,
+                    "longitude": 126.9501
+                  },
+                  "to": {
+                    "name": "테スト A역 승강장",
+                    "latitude": 37.5001,
+                    "longitude": 126.9501
+                  },
+                  "departure_at": "2026-09-13T18:15:00+09:00",
+                  "arrival_at": "2026-09-13T18:20:00+09:00",
+                  "duration_minutes": 5,
+                  "transit": null,
+                  "wait_reason": "safety_buffer"
+                },
+                {
+                  "leg_id": "option-a-leg-3",
+                  "mode": "subway",
+                  "from": {
+                    "name": "테スト A역 승강장",
+                    "latitude": 37.5001,
+                    "longitude": 126.9501
+                  },
+                  "to": {
+                    "name": "테스트 B역 승강장",
+                    "latitude": 37.5101,
+                    "longitude": 127.0201
+                  },
+                  "departure_at": "2026-09-13T18:20:00+09:00",
+                  "arrival_at": "2026-09-13T18:45:00+09:00",
+                  "duration_minutes": 25,
+                  "transit": {
+                    "line_name": "가상 노선 A",
+                    "direction": "테스트 B역 방향",
+                    "headsign": "테스트 B역",
+                    "service_id": "fixture-service-a"
+                  },
+                  "wait_reason": null
+                },
+                {
+                  "leg_id": "option-a-leg-4",
+                  "mode": "walk",
+                  "from": {
+                    "name": "테스트 B역 승강장",
+                    "latitude": 37.5101,
+                    "longitude": 127.0201
+                  },
+                  "to": {
+                    "name": "테스트 B역 2번 출구",
+                    "latitude": 37.51,
+                    "longitude": 127.02
+                  },
+                  "departure_at": "2026-09-13T18:45:00+09:00",
+                  "arrival_at": "2026-09-13T18:50:00+09:00",
+                  "duration_minutes": 5,
+                  "transit": null,
+                  "wait_reason": null
+                }
+              ],
+              "calculation_method": "schedule_search",
+              "sources": [
+                {
+                  "provider": "fixture",
+                  "basis": "demo",
+                  "retrieved_at": "2026-09-13T18:00:00+09:00",
+                  "service_date": "2026-09-13"
+                }
+              ],
+              "warnings": [
+                {
+                  "code": "DEMO_DATA",
+                  "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다."
+                }
+              ],
+              "navigation_url": null
+            },
+            "candidate_set_id": "candidate-a",
+            "selected_at": "2026-09-13T18:00:00+09:00",
+            "expires_at": "2026-09-13T20:50:00+09:00"
+          }
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-state",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 4,
+          "expires_at": "2026-09-13T20:50:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "replan",
+      "description": "재탐색은 현재 선택을 유지하며 새 후보와 비교를 생성한다.",
+      "preconditions": [
+        "select 성공",
+        "동일 출발점·조건 유지. MCP elicitation에서 재탐색 의사 확인. 이전 선택 보존."
+      ],
+      "server_time": "2026-09-13T18:30:00+09:00",
+      "method": "POST",
+      "path": "/journeys/replan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000005"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "previous_plan": {
+          "plan_id": "plan-fixture-1",
+          "selected_option_id": "option-a",
+          "recommended_leave_at": "2026-09-13T18:10:00+09:00",
+          "estimated_arrival_at": "2026-09-13T18:50:00+09:00"
+        },
+        "current_origin_place_id": "fixture:place-a",
+        "reason": "missed_connection",
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 4,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000005"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "plan": {
+            "plan_id": "plan-fixture-2",
+            "generated_at": "2026-09-13T18:30:00+09:00",
+            "refresh_after": "2026-09-13T18:35:00+09:00",
+            "trip": {
+              "kind": "appointment",
+              "origin_place_id": "fixture:place-a",
+              "destination_place_id": "fixture:place-b",
+              "arrival_deadline": "2026-09-13T19:00:00+09:00",
+              "arrival_preference_minutes": 10,
+              "service_date": null,
+              "transport_modes": [
+                "subway",
+                "bus"
+              ]
+            },
+            "origin": {
+              "place_id": "fixture:place-a",
+              "name": "테스트 A역 1번 출구",
+              "address": "서울 내 가상 출발 지점",
+              "latitude": 37.5,
+              "longitude": 126.95
+            },
+            "destination": {
+              "place_id": "fixture:place-b",
+              "name": "테스트 B역 2번 출구",
+              "address": "서울 내 가상 도착 지점",
+              "latitude": 37.51,
+              "longitude": 127.02
+            },
+            "target_arrival_at": "2026-09-13T18:50:00+09:00",
+            "recommended_option_id": "option-replan-a",
+            "options": [
+              {
+                "option_id": "option-replan-a",
+                "summary": "가상 노선 A 이용 · 도보 10분",
+                "recommended_leave_at": "2026-09-13T18:30:00+09:00",
+                "hard_leave_at": null,
+                "estimated_arrival_at": "2026-09-13T19:10:00+09:00",
+                "total_duration_minutes": 40,
+                "buffer": {
+                  "policy_version": "demo-v1",
+                  "total_minutes": 5,
+                  "items": [
+                    {
+                      "code": "BOARDING_MARGIN",
+                      "minutes": 5,
+                      "leg_id": "option-replan-a-leg-2",
+                      "reason": "시연용 탑승 여유 5분"
+                    }
+                  ]
+                },
+                "arrival_status": "late",
+                "late_by_minutes": 10,
+                "target_margin_minutes": -20,
+                "legs": [
+                  {
+                    "leg_id": "option-replan-a-leg-1",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 A역 1번 출구",
+                      "latitude": 37.5,
+                      "longitude": 126.95
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-13T18:30:00+09:00",
+                    "arrival_at": "2026-09-13T18:35:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-replan-a-leg-2",
+                    "mode": "wait",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-13T18:35:00+09:00",
+                    "arrival_at": "2026-09-13T18:40:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": "safety_buffer"
+                  },
+                  {
+                    "leg_id": "option-replan-a-leg-3",
+                    "mode": "subway",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "departure_at": "2026-09-13T18:40:00+09:00",
+                    "arrival_at": "2026-09-13T19:05:00+09:00",
+                    "duration_minutes": 25,
+                    "transit": {
+                      "line_name": "가상 노선 A",
+                      "direction": "테스트 B역 방향",
+                      "headsign": "테스트 B역",
+                      "service_id": "fixture-service-a"
+                    },
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-replan-a-leg-4",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "to": {
+                      "name": "테스트 B역 2번 출구",
+                      "latitude": 37.51,
+                      "longitude": 127.02
+                    },
+                    "departure_at": "2026-09-13T19:05:00+09:00",
+                    "arrival_at": "2026-09-13T19:10:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  }
+                ],
+                "calculation_method": "schedule_search",
+                "sources": [
+                  {
+                    "provider": "fixture",
+                    "basis": "demo",
+                    "retrieved_at": "2026-09-13T18:30:00+09:00",
+                    "service_date": "2026-09-13"
+                  }
+                ],
+                "warnings": [
+                  {
+                    "code": "DEMO_DATA",
+                    "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다."
+                  }
+                ],
+                "navigation_url": null
+              }
+            ]
+          },
+          "comparison": {
+            "previous_plan_id": "plan-fixture-1",
+            "previous_selected_option_id": "option-a",
+            "compared_option_id": "option-replan-a",
+            "arrival_change_minutes": 20,
+            "leave_change_minutes": 20,
+            "summary": "이전 계획보다 20분 늦게 도착하며 약속 마감보다 10분 늦을 것으로 계산됩니다."
+          },
+          "candidate_set_id": "candidate-b",
+          "candidate_expires_at": "2026-09-13T18:35:00+09:00"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-replan",
+          "server_time": "2026-09-13T18:30:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 5,
+          "expires_at": "2026-09-13T20:50:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "select_replan",
+      "description": "새 후보의 명시적 선택.",
+      "preconditions": [
+        "replan 성공",
+        "새 후보를 사용자가 직접 선택. fixture 시간 동결로 권장 출발을 넘기지 않음."
+      ],
+      "server_time": "2026-09-13T18:30:00+09:00",
+      "method": "POST",
+      "path": "/conversations/11111111-1111-4111-8111-111111111111/select",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000006"
+      },
+      "request_body": {
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 5,
+        "candidate_set_id": "candidate-b",
+        "option_id": "option-replan-a",
+        "evidence": {
+          "source": "mcp_elicitation",
+          "interaction_id": "00000000-0000-4000-8000-000000000106",
+          "accepted_at": "2026-09-13T18:30:00+09:00"
+        }
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000006"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "selected_plan_id": "plan-fixture-2",
+          "selected_option_id": "option-replan-a",
+          "candidate_set_id": "candidate-b",
+          "selected_at": "2026-09-13T18:30:00+09:00",
+          "selected_until": "2026-09-13T21:10:00+09:00"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-select-replan",
+          "server_time": "2026-09-13T18:30:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 6,
+          "expires_at": "2026-09-13T21:10:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "plan_replay_after_selection",
+      "description": "최초 응답 revision=3을 그대로 재생하며 현재 서버 revision=4를 낮추지 않는다.",
+      "preconditions": [
+        "select 성공",
+        "plan과 같은 키·본문. 서버 현재 revision=4."
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "plan": {
+            "plan_id": "plan-fixture-1",
+            "generated_at": "2026-09-13T18:00:00+09:00",
+            "refresh_after": "2026-09-13T18:05:00+09:00",
+            "trip": {
+              "kind": "appointment",
+              "origin_place_id": "fixture:place-a",
+              "destination_place_id": "fixture:place-b",
+              "arrival_deadline": "2026-09-13T19:00:00+09:00",
+              "arrival_preference_minutes": 10,
+              "service_date": null,
+              "transport_modes": [
+                "subway",
+                "bus"
+              ]
+            },
+            "origin": {
+              "place_id": "fixture:place-a",
+              "name": "테스트 A역 1번 출구",
+              "address": "서울 내 가상 출발 지점",
+              "latitude": 37.5,
+              "longitude": 126.95
+            },
+            "destination": {
+              "place_id": "fixture:place-b",
+              "name": "테스트 B역 2번 출구",
+              "address": "서울 내 가상 도착 지점",
+              "latitude": 37.51,
+              "longitude": 127.02
+            },
+            "target_arrival_at": "2026-09-13T18:50:00+09:00",
+            "recommended_option_id": "option-a",
+            "options": [
+              {
+                "option_id": "option-a",
+                "summary": "가상 노선 A 이용 · 도보 10분",
+                "recommended_leave_at": "2026-09-13T18:10:00+09:00",
+                "hard_leave_at": null,
+                "estimated_arrival_at": "2026-09-13T18:50:00+09:00",
+                "total_duration_minutes": 40,
+                "buffer": {
+                  "policy_version": "demo-v1",
+                  "total_minutes": 5,
+                  "items": [
+                    {
+                      "code": "BOARDING_MARGIN",
+                      "minutes": 5,
+                      "leg_id": "option-a-leg-2",
+                      "reason": "시연용 탑승 여유 5분"
+                    }
+                  ]
+                },
+                "arrival_status": "on_time",
+                "late_by_minutes": 0,
+                "target_margin_minutes": 0,
+                "legs": [
+                  {
+                    "leg_id": "option-a-leg-1",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 A역 1번 출구",
+                      "latitude": 37.5,
+                      "longitude": 126.95
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-13T18:10:00+09:00",
+                    "arrival_at": "2026-09-13T18:15:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-a-leg-2",
+                    "mode": "wait",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-13T18:15:00+09:00",
+                    "arrival_at": "2026-09-13T18:20:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": "safety_buffer"
+                  },
+                  {
+                    "leg_id": "option-a-leg-3",
+                    "mode": "subway",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "departure_at": "2026-09-13T18:20:00+09:00",
+                    "arrival_at": "2026-09-13T18:45:00+09:00",
+                    "duration_minutes": 25,
+                    "transit": {
+                      "line_name": "가상 노선 A",
+                      "direction": "테스트 B역 방향",
+                      "headsign": "테스트 B역",
+                      "service_id": "fixture-service-a"
+                    },
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-a-leg-4",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "to": {
+                      "name": "테스트 B역 2번 출구",
+                      "latitude": 37.51,
+                      "longitude": 127.02
+                    },
+                    "departure_at": "2026-09-13T18:45:00+09:00",
+                    "arrival_at": "2026-09-13T18:50:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  }
+                ],
+                "calculation_method": "schedule_search",
+                "sources": [
+                  {
+                    "provider": "fixture",
+                    "basis": "demo",
+                    "retrieved_at": "2026-09-13T18:00:00+09:00",
+                    "service_date": "2026-09-13"
+                  }
+                ],
+                "warnings": [
+                  {
+                    "code": "DEMO_DATA",
+                    "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다."
+                  }
+                ],
+                "navigation_url": null
+              }
+            ]
+          },
+          "candidate_set_id": "candidate-a",
+          "candidate_expires_at": "2026-09-13T18:05:00+09:00"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-plan",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 3,
+          "expires_at": "2026-09-13T20:00:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "initial_response_lost",
+      "description": "최초 응답 유실 후 동일 키·본문에 같은 conversation_id 반환.",
+      "preconditions": [
+        "initial_ready가 commit됐으나 MCP가 응답을 수신하지 못함."
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/mobility/interpret",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000001"
+      },
+      "request_body": {
+        "text": "이동 조건을 정리해줘.",
+        "reference_time": "2026-09-13T18:00:00+09:00",
+        "timezone": "Asia/Seoul",
+        "context": {
+          "kind": "appointment",
+          "origin": {
+            "query": "테스트 A역 1번 출구",
+            "place": {
+              "place_id": "fixture:place-a",
+              "name": "테스트 A역 1번 출구",
+              "address": "서울 내 가상 출발 지점",
+              "latitude": 37.5,
+              "longitude": 126.95
+            },
+            "confirmed": true
+          },
+          "destination": {
+            "query": "테스트 B역 2번 출구",
+            "place": {
+              "place_id": "fixture:place-b",
+              "name": "테스트 B역 2번 출구",
+              "address": "서울 내 가상 도착 지점",
+              "latitude": 37.51,
+              "longitude": 127.02
+            },
+            "confirmed": true
+          },
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ],
+          "ambiguities": []
+        },
+        "request_started_at": "2026-09-13T18:00:00+09:00"
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000001"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "draft": {
+            "kind": "appointment",
+            "origin": {
+              "query": "테스트 A역 1번 출구",
+              "place": {
+                "place_id": "fixture:place-a",
+                "name": "테스트 A역 1번 출구",
+                "address": "서울 내 가상 출발 지점",
+                "latitude": 37.5,
+                "longitude": 126.95
+              },
+              "confirmed": true
+            },
+            "destination": {
+              "query": "테스트 B역 2번 출구",
+              "place": {
+                "place_id": "fixture:place-b",
+                "name": "테스트 B역 2번 출구",
+                "address": "서울 내 가상 도착 지점",
+                "latitude": 37.51,
+                "longitude": 127.02
+              },
+              "confirmed": true
+            },
+            "arrival_deadline": "2026-09-13T19:00:00+09:00",
+            "arrival_preference_minutes": 10,
+            "service_date": null,
+            "transport_modes": [
+              "subway",
+              "bus"
+            ],
+            "ambiguities": []
+          },
+          "ready_for_plan": true,
+          "missing_fields": [],
+          "questions": [],
+          "applied_defaults": [],
+          "summary": "오늘 19:00까지 테스트 B역 2번 출구 도착, 10분 전 도착 선호",
+          "draft_revision": 1,
+          "conditions_hash": "8602710d737d3cebf910486efefeb8739174c97982694f616c570ed556a5c829"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-initial-ready",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 1,
+          "expires_at": "2026-09-13T18:30:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "stale_revision",
+      "description": "최신 상태를 확인해 주세요.",
+      "preconditions": [
+        "select 성공. 새 키, revision=2로 요청."
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000007"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 409,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000007"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "CONVERSATION_VERSION_CONFLICT",
+          "message": "최신 상태를 확인해 주세요.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-stale_revision",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 4,
+          "expires_at": "2026-09-13T20:50:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "same_key_different_body",
+      "description": "같은 키를 다른 요청에 사용할 수 없습니다.",
+      "preconditions": [
+        "plan 성공, 동일 키로 본문 변경"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 20,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 409,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "IDEMPOTENCY_KEY_REUSED",
+          "message": "같은 키를 다른 요청에 사용할 수 없습니다.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-same_key_different_body",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 4,
+          "expires_at": "2026-09-13T20:50:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "conversation_expired_replay",
+      "description": "대화가 만료됐습니다.",
+      "preconditions": [
+        "select 성공 후 대화 만료. 같은 plan 키의 성공 payload도 재생하지 않음"
+      ],
+      "server_time": "2026-09-13T20:50:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 410,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000003"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "CONVERSATION_EXPIRED",
+          "message": "대화가 만료됐습니다.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-conversation_expired_replay",
+          "server_time": "2026-09-13T20:50:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 4,
+          "expires_at": "2026-09-13T20:50:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "candidate_expired",
+      "description": "후보가 만료됐습니다. 새 후보를 조회해 주세요.",
+      "preconditions": [
+        "select 성공. candidate-a만 만료. 기존 선택과 확인 유지"
+      ],
+      "server_time": "2026-09-13T18:06:00+09:00",
+      "method": "POST",
+      "path": "/conversations/11111111-1111-4111-8111-111111111111/select",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000008"
+      },
+      "request_body": {
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 4,
+        "candidate_set_id": "candidate-a",
+        "option_id": "option-a",
+        "evidence": {
+          "source": "mcp_elicitation",
+          "interaction_id": "00000000-0000-4000-8000-000000000108",
+          "accepted_at": "2026-09-13T18:06:00+09:00"
+        }
+      },
+      "response_http_status": 410,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000008"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "CANDIDATE_SET_EXPIRED",
+          "message": "후보가 만료됐습니다. 새 후보를 조회해 주세요.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-candidate_expired",
+          "server_time": "2026-09-13T18:06:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 4,
+          "expires_at": "2026-09-13T20:50:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "confirmation_missing_evidence",
+      "description": "실제 사용자 확인이 필요합니다.",
+      "preconditions": [
+        "initial_ready 성공. evidence 누락"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/conversations/11111111-1111-4111-8111-111111111111/confirm",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000009"
+      },
+      "request_body": {
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 1,
+        "draft_revision": 1,
+        "conditions_hash": "8602710d737d3cebf910486efefeb8739174c97982694f616c570ed556a5c829"
+      },
+      "response_http_status": 422,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000009"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "USER_CONFIRMATION_REQUIRED",
+          "message": "실제 사용자 확인이 필요합니다.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-confirmation_missing_evidence",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 1,
+          "expires_at": "2026-09-13T18:30:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "changed_conditions",
+      "description": "변경한 조건을 다시 확인해 주세요.",
+      "preconditions": [
+        "confirm 성공. 새 키로 확인하지 않은 조건 전달. provider 호출 0회"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000010"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 20,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 422,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000010"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "USER_CONFIRMATION_REQUIRED",
+          "message": "변경한 조건을 다시 확인해 주세요.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-changed_conditions",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 2,
+          "expires_at": "2026-09-13T20:00:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "different_conversation_candidate",
+      "description": "현재 대화의 후보를 선택해 주세요.",
+      "preconditions": [
+        "plan 성공. 다른 대화의 후보 ID를 삽입"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/conversations/11111111-1111-4111-8111-111111111111/select",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000011"
+      },
+      "request_body": {
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 3,
+        "candidate_set_id": "candidate-other-conversation",
+        "option_id": "option-a",
+        "evidence": {
+          "source": "mcp_elicitation",
+          "interaction_id": "00000000-0000-4000-8000-000000000111",
+          "accepted_at": "2026-09-13T18:00:00+09:00"
+        }
+      },
+      "response_http_status": 409,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000011"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "SELECTION_MISMATCH",
+          "message": "현재 대화의 후보를 선택해 주세요.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-different_conversation_candidate",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 3,
+          "expires_at": "2026-09-13T20:00:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "unknown_conversation",
+      "description": "대화를 찾을 수 없습니다.",
+      "preconditions": [
+        "존재한 적 없는 ID 또는 tombstone 삭제 후 ID"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000012"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "99999999-9999-4999-8999-999999999999",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 404,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000012"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "CONVERSATION_NOT_FOUND",
+          "message": "대화를 찾을 수 없습니다.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-unknown_conversation",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true
+        }
+      }
+    },
+    {
+      "id": "initial_request_too_old",
+      "description": "초기 요청의 복구 가능 시간이 지났습니다.",
+      "preconditions": [
+        "초기 성공 대화와 최소 키 매핑의 보존 기간이 모두 종료됨. 예전 본문 재전송"
+      ],
+      "server_time": "2026-09-17T18:00:00+09:00",
+      "method": "POST",
+      "path": "/mobility/interpret",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000001"
+      },
+      "request_body": {
+        "text": "이동 조건을 정리해줘.",
+        "reference_time": "2026-09-13T18:00:00+09:00",
+        "timezone": "Asia/Seoul",
+        "context": {
+          "kind": "appointment",
+          "origin": {
+            "query": "테스트 A역 1번 출구",
+            "place": {
+              "place_id": "fixture:place-a",
+              "name": "테스트 A역 1번 출구",
+              "address": "서울 내 가상 출발 지점",
+              "latitude": 37.5,
+              "longitude": 126.95
+            },
+            "confirmed": true
+          },
+          "destination": {
+            "query": "테스트 B역 2번 출구",
+            "place": {
+              "place_id": "fixture:place-b",
+              "name": "테스트 B역 2번 출구",
+              "address": "서울 내 가상 도착 지점",
+              "latitude": 37.51,
+              "longitude": 127.02
+            },
+            "confirmed": true
+          },
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ],
+          "ambiguities": []
+        },
+        "request_started_at": "2026-09-13T18:00:00+09:00"
+      },
+      "response_http_status": 410,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000001"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "INITIAL_REQUEST_EXPIRED",
+          "message": "초기 요청의 복구 가능 시간이 지났습니다.",
+          "retryable": false,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-initial_request_too_old",
+          "server_time": "2026-09-17T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true
+        }
+      }
+    },
+    {
+      "id": "provider_failure",
+      "description": "교통 제공처에 일시적으로 연결할 수 없습니다.",
+      "preconditions": [
+        "confirm 성공. provider 실패. domain·revision·updated_at·TTL 변경 없음. 최대 1회 재시도"
+      ],
+      "server_time": "2026-09-13T18:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000013"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "appointment",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": "2026-09-13T19:00:00+09:00",
+          "arrival_preference_minutes": 10,
+          "service_date": null,
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "11111111-1111-4111-8111-111111111111",
+        "revision": 2,
+        "confirmation_id": "confirmation-a"
+      },
+      "response_http_status": 503,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000013"
+      },
+      "response_body": {
+        "status": "error",
+        "data": null,
+        "error": {
+          "code": "ROUTING_PROVIDER_UNAVAILABLE",
+          "message": "교통 제공처에 일시적으로 연결할 수 없습니다.",
+          "retryable": true,
+          "details": []
+        },
+        "meta": {
+          "request_id": "proposal-provider_failure",
+          "server_time": "2026-09-13T18:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "revision": 2,
+          "expires_at": "2026-09-13T20:00:00+09:00"
+        }
+      }
+    },
+    {
+      "id": "last_journey",
+      "description": "별도 막차 경로 대신 trip.kind를 사용. 운행일과 다음 날 도착 분리",
+      "preconditions": [
+        "다른 대화에서 last_journey의 장소·운행일·조건을 elicitation으로 확인 완료"
+      ],
+      "server_time": "2026-09-12T23:00:00+09:00",
+      "method": "POST",
+      "path": "/journeys/plan",
+      "request_headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000014"
+      },
+      "request_body": {
+        "trip": {
+          "kind": "last_journey",
+          "origin_place_id": "fixture:place-a",
+          "destination_place_id": "fixture:place-b",
+          "arrival_deadline": null,
+          "arrival_preference_minutes": 0,
+          "service_date": "2026-09-12",
+          "transport_modes": [
+            "subway",
+            "bus"
+          ]
+        },
+        "user_confirmed": true,
+        "conversation_id": "33333333-3333-4333-8333-333333333333",
+        "revision": 2,
+        "confirmation_id": "confirmation-last"
+      },
+      "response_http_status": 200,
+      "response_headers": {
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000014"
+      },
+      "response_body": {
+        "status": "ok",
+        "data": {
+          "plan": {
+            "plan_id": "plan-fixture-last-1",
+            "generated_at": "2026-09-12T23:00:00+09:00",
+            "refresh_after": "2026-09-12T23:05:00+09:00",
+            "trip": {
+              "kind": "last_journey",
+              "origin_place_id": "fixture:place-a",
+              "destination_place_id": "fixture:place-b",
+              "arrival_deadline": null,
+              "arrival_preference_minutes": 0,
+              "service_date": "2026-09-12",
+              "transport_modes": [
+                "subway",
+                "bus"
+              ]
+            },
+            "origin": {
+              "place_id": "fixture:place-a",
+              "name": "테스트 A역 1번 출구",
+              "address": "서울 내 가상 출발 지점",
+              "latitude": 37.5,
+              "longitude": 126.95
+            },
+            "destination": {
+              "place_id": "fixture:place-b",
+              "name": "테스트 B역 2번 출구",
+              "address": "서울 내 가상 도착 지점",
+              "latitude": 37.51,
+              "longitude": 127.02
+            },
+            "target_arrival_at": null,
+            "recommended_option_id": "option-last-a",
+            "options": [
+              {
+                "option_id": "option-last-a",
+                "summary": "가상 노선 A 이용 · 도보 10분",
+                "recommended_leave_at": "2026-09-12T23:35:00+09:00",
+                "hard_leave_at": "2026-09-12T23:40:00+09:00",
+                "estimated_arrival_at": "2026-09-13T00:15:00+09:00",
+                "total_duration_minutes": 40,
+                "buffer": {
+                  "policy_version": "demo-v1",
+                  "total_minutes": 5,
+                  "items": [
+                    {
+                      "code": "BOARDING_MARGIN",
+                      "minutes": 5,
+                      "leg_id": "option-last-a-leg-2",
+                      "reason": "시연용 탑승 여유 5분"
+                    }
+                  ]
+                },
+                "arrival_status": "not_applicable",
+                "late_by_minutes": null,
+                "target_margin_minutes": null,
+                "legs": [
+                  {
+                    "leg_id": "option-last-a-leg-1",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 A역 1번 출구",
+                      "latitude": 37.5,
+                      "longitude": 126.95
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-12T23:35:00+09:00",
+                    "arrival_at": "2026-09-12T23:40:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-last-a-leg-2",
+                    "mode": "wait",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "departure_at": "2026-09-12T23:40:00+09:00",
+                    "arrival_at": "2026-09-12T23:45:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": "safety_buffer"
+                  },
+                  {
+                    "leg_id": "option-last-a-leg-3",
+                    "mode": "subway",
+                    "from": {
+                      "name": "테スト A역 승강장",
+                      "latitude": 37.5001,
+                      "longitude": 126.9501
+                    },
+                    "to": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "departure_at": "2026-09-12T23:45:00+09:00",
+                    "arrival_at": "2026-09-13T00:10:00+09:00",
+                    "duration_minutes": 25,
+                    "transit": {
+                      "line_name": "가상 노선 A",
+                      "direction": "테스트 B역 방향",
+                      "headsign": "테스트 B역",
+                      "service_id": "fixture-service-a"
+                    },
+                    "wait_reason": null
+                  },
+                  {
+                    "leg_id": "option-last-a-leg-4",
+                    "mode": "walk",
+                    "from": {
+                      "name": "테스트 B역 승강장",
+                      "latitude": 37.5101,
+                      "longitude": 127.0201
+                    },
+                    "to": {
+                      "name": "테스트 B역 2번 출구",
+                      "latitude": 37.51,
+                      "longitude": 127.02
+                    },
+                    "departure_at": "2026-09-13T00:10:00+09:00",
+                    "arrival_at": "2026-09-13T00:15:00+09:00",
+                    "duration_minutes": 5,
+                    "transit": null,
+                    "wait_reason": null
+                  }
+                ],
+                "calculation_method": "schedule_search",
+                "sources": [
+                  {
+                    "provider": "fixture",
+                    "basis": "demo",
+                    "retrieved_at": "2026-09-12T23:00:00+09:00",
+                    "service_date": "2026-09-12"
+                  }
+                ],
+                "warnings": [
+                  {
+                    "code": "DEMO_DATA",
+                    "message": "가상 시연 데이터이며 실제 운행 정보가 아닙니다."
+                  }
+                ],
+                "navigation_url": null
+              }
+            ]
+          },
+          "candidate_set_id": "candidate-last",
+          "candidate_expires_at": "2026-09-12T23:05:00+09:00"
+        },
+        "error": null,
+        "meta": {
+          "request_id": "proposal-last-journey",
+          "server_time": "2026-09-12T23:00:00+09:00",
+          "api_version": "v1",
+          "is_demo": true,
+          "conversation_id": "33333333-3333-4333-8333-333333333333",
+          "revision": 3,
+          "expires_at": "2026-09-13T01:00:00+09:00"
+        }
+      }
+    }
+  ]
+}

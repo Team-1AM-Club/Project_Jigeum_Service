@@ -1,0 +1,166 @@
+diff --git a/backend/app/integrations/seoul_subway.py b/backend/app/integrations/seoul_subway.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/integrations/seoul_subway.py
+@@ -0,0 +1,42 @@
++"""서울 지하철 공식 역 코드표의 검증된 row만 정규화한다."""
++
++from collections.abc import Mapping
++
++from app.domain.transit import Evidence, ProviderIdentifier, TransitPlace
++
++_STATION_SERVICE = "subway-stations"
++_STATION_OPERATION = "SearchSTNBySubwayLineInfo"
++_REQUIRED_STATION_FIELDS = ("STATION_CD", "FR_CODE", "STATION_NM", "LINE_NUM")
++
++
++def _required_string(row: Mapping[str, object], field: str) -> str:
++    value = row.get(field)
++    if not isinstance(value, str) or not value.strip():
++        raise ValueError(f"역 코드표의 필수 문자열이 올바르지 않습니다: {field}")
++    return value
++
++
++def normalize_station_row(
++    row: Mapping[str, object], *, place_id: str, evidence: Evidence
++) -> TransitPlace:
++    """OA-15442 역 코드표 row를 좌표 없는 내부 역 모델로 변환한다."""
++    if evidence.service != _STATION_SERVICE:
++        raise ValueError("역 코드표와 다른 서비스 근거는 사용할 수 없습니다.")
++    if evidence.operation != _STATION_OPERATION:
++        raise ValueError("역 코드표와 다른 작업 근거는 사용할 수 없습니다.")
++
++    station_cd, fr_code, station_name, line_num = (
++        _required_string(row, field) for field in _REQUIRED_STATION_FIELDS
++    )
++    return TransitPlace(
++        place_id=place_id,
++        mode="subway",
++        name=station_name,
++        line=line_num,
++        provider_ids=[
++            ProviderIdentifier(namespace="STATION_CD", value=station_cd),
++            ProviderIdentifier(namespace="FR_CODE", value=fr_code),
++        ],
++        coordinate=None,
++        evidence=evidence,
++    )
+diff --git a/backend/tests/unit/test_seoul_subway.py b/backend/tests/unit/test_seoul_subway.py
+new file mode 100644
+--- /dev/null
++++ b/backend/tests/unit/test_seoul_subway.py
+@@ -0,0 +1,114 @@
++"""OA-15442 역 코드표 row의 최소 정규화 경계를 검증한다."""
++
++from datetime import datetime, timedelta, timezone
++
++import pytest
++
++from app.domain.transit import Evidence
++from app.integrations.seoul_subway import normalize_station_row
++
++
++def moment() -> datetime:
++    return datetime(2026, 9, 16, 18, 0, tzinfo=timezone(timedelta(hours=9)))
++
++
++def station_evidence(**changes) -> Evidence:
++    values = {
++        "provider": "seoul-open-api",
++        "service": "subway-stations",
++        "operation": "SearchSTNBySubwayLineInfo",
++        "basis": "static",
++        "retrieved_at": moment(),
++        "verification_state": "real_call_verified",
++    }
++    values.update(changes)
++    return Evidence(**values)
++
++
++def station_row(**changes) -> dict[str, object]:
++    values: dict[str, object] = {
++        "STATION_CD": "0015",
++        "FR_CODE": "0150",
++        "STATION_NM": "합성역",
++        "LINE_NUM": "01호선",
++    }
++    values.update(changes)
++    return values
++
++
++def test_normalizes_confirmed_station_row_without_synthesizing_coordinate_or_dates():
++    evidence = station_evidence()
++
++    place = normalize_station_row(
++        station_row(), place_id="opaque-station-place", evidence=evidence
++    )
++
++    assert place.place_id == "opaque-station-place"
++    assert place.mode == "subway"
++    assert place.name == "합성역"
++    assert place.line == "01호선"
++    assert [(item.namespace, item.value) for item in place.provider_ids] == [
++        ("STATION_CD", "0015"),
++        ("FR_CODE", "0150"),
++    ]
++    assert place.coordinate is None
++    assert place.evidence == evidence
++    assert place.evidence.basis_at is None
++    assert place.evidence.service_date is None
++
++
++@pytest.mark.parametrize("field", ["STATION_CD", "FR_CODE", "STATION_NM", "LINE_NUM"])
++def test_rejects_missing_required_station_row_fields(field):
++    row = station_row()
++    row.pop(field)
++
++    with pytest.raises(ValueError):
++        normalize_station_row(
++            row, place_id="opaque-station-place", evidence=station_evidence()
++        )
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("STATION_CD", 15),
++        ("FR_CODE", None),
++        ("STATION_NM", "   "),
++        ("LINE_NUM", ""),
++    ],
++)
++def test_rejects_malformed_required_station_row_fields(field, value):
++    with pytest.raises(ValueError):
++        normalize_station_row(
++            station_row(**{field: value}),
++            place_id="opaque-station-place",
++            evidence=station_evidence(),
++        )
++
++
++@pytest.mark.parametrize(
++    "evidence",
++    [
++        station_evidence(service="subway-arrivals"),
++        station_evidence(operation="realtimeStationArrival"),
++    ],
++)
++def test_rejects_station_rows_with_evidence_from_another_service_or_operation(evidence):
++    with pytest.raises(ValueError):
++        normalize_station_row(
++            station_row(), place_id="opaque-station-place", evidence=evidence
++        )
++
++
++def test_rejects_timetable_or_path_shaped_rows():
++    with pytest.raises(ValueError):
++        normalize_station_row(
++            {
++                "TRAIN_NO": "101",
++                "ARRIVETIME": "235900",
++                "LEFTTIME": "240100",
++                "tmnlStnCd": "0150",
++            },
++            place_id="opaque-station-place",
++            evidence=station_evidence(),
++        )

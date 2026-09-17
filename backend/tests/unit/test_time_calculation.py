@@ -5,17 +5,16 @@
 - 시간대·자정 경계 처리 검증
 """
 
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from app.services.time_calculation import (
-    compute_target_arrival_at,
+    check_date_boundary_crossing,
     compute_recommended_leave_at,
+    compute_target_arrival_at,
     ensure_seoul,
     safe_add_minutes,
     safe_subtract_minutes,
-    check_date_boundary_crossing,
 )
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -102,10 +101,12 @@ class TestBufferDuplicationPrevention:
         # 19:00 - 42 (buffer 제외) = 18:18
 
         expected_second = datetime(2026, 9, 16, 18, 18, 0, tzinfo=SEOUL_TZ)
-        assert target_second == expected_second,             f"buffer 중복 적용 방지 실패: 기대 {expected_second}, 실제 {target_second}"
+        assert target_second == expected_second, (
+            f"buffer 중복 적용 방지 실패: 기대 {expected_second}, 실제 {target_second}"
+        )
 
         # 두 결과가 달라야 함 (buffer 적용 여부 차이)
-        assert target_first != target_second,             "buffer 적용 여부에 따른 결과 차이 필요"
+        assert target_first != target_second, "buffer 적용 여부에 따른 결과 차이 필요"
 
     def test_buffer_already_applied_prevents_extra_subtraction(self):
         """already_applied_buffer=True: buffer만큼 추가로 빼지 않음."""
@@ -129,8 +130,12 @@ class TestBufferDuplicationPrevention:
         )
         # 20:00 - 60 = 19:00
 
-        assert t1 == datetime(2026, 9, 16, 18, 50, 0, tzinfo=SEOUL_TZ),             f"t1 기대 19:50, 실제 {t1}"
-        assert t2 == datetime(2026, 9, 16, 19, 0, 0, tzinfo=SEOUL_TZ),             f"t2 기대 19:00, 실제 {t2}"
+        assert t1 == datetime(2026, 9, 16, 18, 50, 0, tzinfo=SEOUL_TZ), (
+            f"t1 기대 19:50, 실제 {t1}"
+        )
+        assert t2 == datetime(2026, 9, 16, 19, 0, 0, tzinfo=SEOUL_TZ), (
+            f"t2 기대 19:00, 실제 {t2}"
+        )
         # 차이: 정확히 buffer_minutes(10분)
         diff = abs((t1 - t2).total_seconds() / 60)
         assert diff == 10, f"buffer 차이 10분 기대, 실제 {diff}분"
@@ -163,7 +168,9 @@ class TestRecommendedLeaveAt:
             total_duration_minutes=total_duration,
         )
 
-        assert leave_at < target_arrival,             f"권장 출발시각({leave_at})이 목표 도착({target_arrival})보다 이후"
+        assert leave_at < target_arrival, (
+            f"권장 출발시각({leave_at})이 목표 도착({target_arrival})보다 이후"
+        )
 
 
 class TestEnsureSeoul:
@@ -171,7 +178,7 @@ class TestEnsureSeoul:
 
     def test_ensure_seoul_aware_datetime(self):
         """aware datetime → Asia/Seoul로 변환."""
-        utc_time = datetime(2026, 9, 16, 10, 0, 0, tzinfo=timezone.utc)
+        utc_time = datetime(2026, 9, 16, 10, 0, 0, tzinfo=UTC)
         seoul_time = ensure_seoul(utc_time)
 
         assert seoul_time.tzinfo == SEOUL_TZ
@@ -220,7 +227,9 @@ class TestDateBoundaryCrossing:
 
         warning = check_date_boundary_crossing(from_dt, to_dt, allow_crossing=True)
         # allow_crossing=True → 경고 없음 (또는 날짜 변경 알림)
-        assert warning is None or "날짜" in warning,             f"예상: 날짜 경계 경고 또는 None, 실제: {warning}"
+        assert warning is None or "날짜" in warning, (
+            f"예상: 날짜 경계 경고 또는 None, 실제: {warning}"
+        )
 
 
 class TestTimeCalculationIntegration:
@@ -249,11 +258,15 @@ class TestTimeCalculationIntegration:
         # 18:13 - 42 = 17:31
 
         # 검증: leave < target < deadline
-        assert leave < target < arrival_deadline,             f"순서 위반: leave={leave} < target={target} < deadline={arrival_deadline}"
+        assert leave < target < arrival_deadline, (
+            f"순서 위반: leave={leave} < target={target} < deadline={arrival_deadline}"
+        )
 
         # buffer 포함 여부 확인 (total_duration 기준)
         leave_to_target = (target - leave).total_seconds() / 60
-        assert leave_to_target == total_duration,             f"leave→target 시간 = total_duration({total_duration}) 기대, 실제 {leave_to_target}분"
+        assert leave_to_target == total_duration, (
+            f"leave→target 시간 = total_duration({total_duration}) 기대, 실제 {leave_to_target}분"
+        )
 
     def test_target_arrival_at_with_different_preferences(self):
         """도착 여유 시간별 target_arrival_at 비교."""

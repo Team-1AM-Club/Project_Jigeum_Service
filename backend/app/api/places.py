@@ -1,11 +1,14 @@
 """GET /api/v1/places - 장소 검색 엔드포인트."""
-from fastapi import APIRouter, Query, HTTPException
-from app.schemas.places import PlaceSearchQuery, PlacesResponse, PlaceResult
-from app.schemas.errors import ErrorCode
-from app.schemas.common import Envelope, Meta
-from app.services.mock.mock_providers import MockPlaceProvider
+
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Query
+
+from app.schemas.common import Envelope, Meta
+from app.schemas.errors import ErrorCode
+from app.schemas.places import PlaceResult, PlacesResponse
+from app.services.mock.mock_providers import MockPlaceProvider
 
 router = APIRouter()
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
@@ -17,7 +20,9 @@ async def get_places(
     query: str = Query(..., min_length=1, max_length=200, description="검색어"),
     latitude: float = Query(None, ge=-90, le=90, description="중심 위도 (옵션)"),
     longitude: float = Query(None, ge=-180, le=180, description="중심 경도 (옵션)"),
-    radius_meters: int = Query(None, ge=100, le=50000, description="검색 반경 미터 (옵션)"),
+    radius_meters: int = Query(
+        None, ge=100, le=50000, description="검색 반경 미터 (옵션)"
+    ),
     limit: int = Query(5, ge=1, le=20, description="최대 결과 수"),
     offset: int = Query(0, ge=0, description="오프셋"),
 ) -> Envelope:
@@ -33,6 +38,7 @@ async def get_places(
     # 입력 검증 (빈 검색어 이미 Query에서 막힘)
     if not query.strip():
         from app.api.responses import error_response
+
         return error_response(
             error_code=ErrorCode.VALIDATION_ERROR,
             message="검색어는 비어있을 수 없습니다.",
@@ -50,6 +56,7 @@ async def get_places(
         )
     except Exception as exc:
         from app.api.responses import error_response
+
         return error_response(
             error_code=ErrorCode.PLACE_PROVIDER_UNAVAILABLE,
             message=f"장소 제공자 오류: {exc}",
@@ -58,6 +65,7 @@ async def get_places(
 
     if not result.ok:
         from app.api.responses import error_response
+
         return error_response(
             error_code=ErrorCode.PLACE_PROVIDER_UNAVAILABLE,
             message=result.error_message or "장소 제공자 오류",

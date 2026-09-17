@@ -6,42 +6,36 @@
 - 제공사 실패 시 상태 불변 검증
 - tombstone 전환·hard delete 전체 흐름 검증
 """
-import pytest
+
 import uuid
-import json
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, patch, MagicMock
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import create_engine, select, and_
+import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.conversation import Conversation, ConversationStatus
 from app.models.idempotency import IdempotencyRecord
 from app.models.plan import Plan
+from app.services.calculation_service import (
+    StateChangeValidationError,
+    validate_plan_request_prerequisites,
+    validate_state_change_request,
+)
 from app.services.conversation_service import (
+    check_and_handle_expiry,
     create_conversation,
     get_conversation,
-    update_conversation,
-    check_and_handle_expiry,
     hard_delete_conversation,
-    hard_delete_if_eligible,
-    mark_conditions_confirmed,
     mark_candidate_set_ready,
+    mark_conditions_confirmed,
     mark_plan_selected,
+    update_conversation,
 )
 from app.services.idempotency_service import (
     compute_payload_hash,
     save_idempotency_record,
-    validate_idempotency_key_format,
 )
-from app.services.calculation_service import (
-    validate_state_change_request,
-    validate_plan_request_prerequisites,
-    StateChangeValidationError,
-)
-from app.schemas.journeys import ReplanReason
-from app.schemas.errors import ErrorCode
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -49,6 +43,7 @@ SEOUL_TZ = ZoneInfo("Asia/Seoul")
 # ─────────────────────────────────────────────
 # Fixture: in-memory SQLite DB
 # ─────────────────────────────────────────────
+
 
 @pytest.fixture
 def db_session():
@@ -69,6 +64,7 @@ def db_session():
 # ─────────────────────────────────────────────
 # T068: 정상 흐름 통합 테스트
 # ─────────────────────────────────────────────
+
 
 class TestConversationE2E:
     """대화 상태 종단 간 통합 테스트."""
@@ -132,7 +128,10 @@ class TestConversationE2E:
             http_method="POST",
             api_path="/api/v1/journeys/plan",
             expected_revision=1,
-            request_body={"origin_place_id": "place1", "destination_place_id": "place2"},
+            request_body={
+                "origin_place_id": "place1",
+                "destination_place_id": "place2",
+            },
             response_body=response_body,
             response_status=200,
         )
@@ -147,11 +146,19 @@ class TestConversationE2E:
         )
 
         from app.services.idempotency_service import check_idempotency_hit
-        hit = check_idempotency_hit(db=db_session, conversation_id=conv.conversation_id, idempotency_key=key, expected_payload_hash=expected_hash)
+
+        hit = check_idempotency_hit(
+            db=db_session,
+            conversation_id=conv.conversation_id,
+            idempotency_key=key,
+            expected_payload_hash=expected_hash,
+        )
         assert hit == response_body
 
         # conversation revision 변화 없음 (상태 변경 안 됨)
-        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
+        retrieved = get_conversation(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert retrieved.revision == 1
 
     def test_idempotency_reused_different_payload_returns_409(self, db_session):
@@ -181,7 +188,13 @@ class TestConversationE2E:
         )
 
         from app.services.idempotency_service import check_idempotency_conflict
-        is_conflict = check_idempotency_conflict(db=db_session, conversation_id=conv.conversation_id, idempotency_key=key, expected_payload_hash=expected_hash)
+
+        is_conflict = check_idempotency_conflict(
+            db=db_session,
+            conversation_id=conv.conversation_id,
+            idempotency_key=key,
+            expected_payload_hash=expected_hash,
+        )
         assert is_conflict is True
 
     def test_revision_conflict_returns_409(self, db_session):
@@ -277,6 +290,7 @@ class TestConversationE2E:
 # T068: 제공자 실패 시 상태 불변 검증
 # ─────────────────────────────────────────────
 
+
 class TestProviderFailureStateImmutability:
     """제공자 호출 실패 시 상태 불변 검증."""
 
@@ -288,11 +302,16 @@ class TestProviderFailureStateImmutability:
         # Idempotency 기록 없음 (실패했으므로)
         key = str(uuid.uuid4())
         from app.services.idempotency_service import get_idempotency_record
-        record = get_idempotency_record(db=db_session, conversation_id=conv.conversation_id, idempotency_key=key)
+
+        record = get_idempotency_record(
+            db=db_session, conversation_id=conv.conversation_id, idempotency_key=key
+        )
         assert record is None
 
         # conversation 상태는 그대로
-        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
+        retrieved = get_conversation(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert retrieved.revision == initial_revision
         assert retrieved.status == ConversationStatus.ACTIVE
 
@@ -304,13 +323,16 @@ class TestProviderFailureStateImmutability:
         # 제공사 실패 시뮬레이션 (아무것도 하지 않음)
 
         # updated_at 변화 없음
-        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
+        retrieved = get_conversation(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert retrieved.updated_at == initial_updated_at
 
 
 # ─────────────────────────────────────────────
 # T068: Tombstone 전환·Hard delete 전체 흐름
 # ─────────────────────────────────────────────
+
 
 class TestTombstoneHardDeleteFlow:
     """Tombstone 전환·Hard delete 전체 흐름 검증."""
@@ -326,7 +348,9 @@ class TestTombstoneHardDeleteFlow:
         )
 
         # 만료 처리
-        result, was_expired = check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
+        result, was_expired = check_and_handle_expiry(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert was_expired is True
         assert result.status == ConversationStatus.TOMBSTONE
 
@@ -350,7 +374,9 @@ class TestTombstoneHardDeleteFlow:
         hard_delete_conversation(db=db_session, conversation_id=conv.conversation_id)
 
         # 동일 ID 조회 → None (404)
-        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id, include_expired=True)
+        retrieved = get_conversation(
+            db=db_session, conversation_id=conv.conversation_id, include_expired=True
+        )
         assert retrieved is None
 
     def test_hard_delete_not_allowed_for_active(self, db_session):
@@ -358,7 +384,9 @@ class TestTombstoneHardDeleteFlow:
         conv = create_conversation(db=db_session)
 
         with pytest.raises(ValueError, match="tombstone"):
-            hard_delete_conversation(db=db_session, conversation_id=conv.conversation_id)
+            hard_delete_conversation(
+                db=db_session, conversation_id=conv.conversation_id
+            )
 
     def test_tombstone_idempotent_multiple_expiry_calls(self, db_session):
         """여러 번 만료 호출 → 멱등."""
@@ -368,7 +396,9 @@ class TestTombstoneHardDeleteFlow:
         check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
         check_and_handle_expiry(db=db_session, conversation_id=conv.conversation_id)
 
-        result = get_conversation(db=db_session, conversation_id=conv.conversation_id, include_expired=True)
+        result = get_conversation(
+            db=db_session, conversation_id=conv.conversation_id, include_expired=True
+        )
         assert result.status == ConversationStatus.TOMBSTONE
         assert result.confirmed_conditions is None
 
@@ -376,6 +406,7 @@ class TestTombstoneHardDeleteFlow:
 # ─────────────────────────────────────────────
 # T068: T040 (US1 특유 검증) 통합 테스트
 # ─────────────────────────────────────────────
+
 
 class TestT040US1SpecificValidation:
     """T040: US1 특유 검증 (확인 조건 충족 전 plan 요청 차단)."""
@@ -441,11 +472,9 @@ class TestT040US1SpecificValidation:
             user_confirmed=True,
         )
 
-
-# ─────────────────────────────────────────────
-# T068: T063 일반 상태 변경 검증 통합 테스트
-# ─────────────────────────────────────────────
-
+    # ─────────────────────────────────────────────
+    # T068: T063 일반 상태 변경 검증 통합 테스트
+    # ─────────────────────────────────────────────
 
     def test_confirm_then_plan_allowed(self, db_session):
         """confirm 성공 → 동일 조건 plan 허용 (US1 핵심 시나리오).
@@ -543,7 +572,9 @@ class TestT040US1SpecificValidation:
         )
 
         # 재확인: 동일 조건 유지
-        retrieved = get_conversation(db=db_session, conversation_id=conv.conversation_id)
+        retrieved = get_conversation(
+            db=db_session, conversation_id=conv.conversation_id
+        )
         assert retrieved.confirmed_conditions == original_conditions
         assert retrieved.confirmed_conditions["user_confirmed"] is True
         assert retrieved.confirmed_conditions["conditions_confirmed"] is True
@@ -668,6 +699,7 @@ class TestT063StateValidation:
 # ─────────────────────────────────────────────
 # T068: Payload Hash 범위 검증 (SC-016)
 # ─────────────────────────────────────────────
+
 
 class TestPayloadHashScope:
     """Payload hash 계산 범위 검증 (SC-016)."""

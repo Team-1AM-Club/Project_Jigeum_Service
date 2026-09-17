@@ -1,0 +1,116 @@
+{
+  "status": "ok",
+  "data": {
+    "plan_id": "demo_plan_contract_review",
+    "conversation_id": "demo_conversation_contract_review",
+    "origin_place_id": "demo_station_start",
+    "destination_place_id": "demo_station_end",
+    "arrival_deadline": "2026-09-16T19:00:00+09:00",
+    "target_arrival_at": "2026-09-16T18:50:00+09:00",
+    "recommended_leave_at": "2026-09-16T18:05:00+09:00",
+    "total_duration_minutes": 45,
+    "transport_mode": "subway",
+    "recommended_option_id": "demo_option_1",
+    "comparison": {
+      "options": [
+        {
+          "option_id": "demo_option_1",
+          "recommended_leave_at": "2026-09-16T18:05:00+09:00",
+          "target_arrival_at": "2026-09-16T18:50:00+09:00",
+          "total_duration_minutes": 45,
+          "transport_mode": "subway",
+          "reasoning": "합성 계약 예시: 이동·대기 40분과 첫 승차 전 여유 5분을 합쳐 45분. 출발 18:05, 도착 18:50.",
+          "estimated_arrival_at": "2026-09-16T18:50:00+09:00",
+          "hard_leave_at": null,
+          "buffer": {
+            "policy_version": "transit-initial-5m-v1",
+            "total_minutes": 5,
+            "items": [
+              {
+                "code": "initial_boarding_margin",
+                "minutes": 5,
+                "leg_id": "demo_buffer_leg",
+                "reason": "첫 승차 전 5분, 여정당 한 번"
+              }
+            ]
+          },
+          "legs": [
+            {
+              "leg_id": "demo_buffer_leg",
+              "mode": "wait",
+              "from": {
+                "name": "시연 출발역",
+                "latitude": 37.5,
+                "longitude": 127
+              },
+              "to": {
+                "name": "시연 출발역",
+                "latitude": 37.5,
+                "longitude": 127
+              },
+              "departure_at": "2026-09-16T18:05:00+09:00",
+              "arrival_at": "2026-09-16T18:10:00+09:00",
+              "duration_minutes": 5,
+              "transit": null,
+              "wait_reason": "safety_buffer"
+            },
+            {
+              "leg_id": "demo_ride_leg",
+              "mode": "subway",
+              "from": {
+                "name": "시연 출발역",
+                "latitude": 37.5,
+                "longitude": 127
+              },
+              "to": {
+                "name": "시연 도착역",
+                "latitude": 37.6,
+                "longitude": 127.1
+              },
+              "departure_at": "2026-09-16T18:10:00+09:00",
+              "arrival_at": "2026-09-16T18:50:00+09:00",
+              "duration_minutes": 40,
+              "transit": {
+                "line_name": "시연 노선",
+                "direction": "시연 도착역 방면",
+                "headsign": "시연 도착역",
+                "service_id": "DEMO001"
+              },
+              "wait_reason": null
+            }
+          ],
+          "sources": [
+            {
+              "provider": "synthetic-contract-fixture",
+              "basis": "demo",
+              "basis_at": null,
+              "retrieved_at": "2026-09-16T18:00:00+09:00",
+              "service_date": "2026-09-16"
+            }
+          ],
+          "warnings": [
+            {
+              "code": "DEMO_DATA",
+              "message": "역·좌표·노선·운행편·시각은 모두 합성 계약 예시이며 실제 운행 근거가 아닙니다."
+            }
+          ]
+        }
+      ],
+      "selected_option_id": null,
+      "comparison_reason": "권장 후보와 사용자 선택은 구분한다. 선택 전 selected_option_id는 null."
+    },
+    "buffer_applied": 5,
+    "notes": "배치 승인된 합성 계약 예시. 실제 조회·계산 성공 또는 구현 완료의 증거가 아니다.",
+    "is_last_journey": false,
+    "operating_date": null,
+    "arrival_date": null,
+    "last_journey_supported": false
+  },
+  "error": null,
+  "meta": {
+    "request_id": "00000000-0000-4000-8000-000000000001",
+    "server_time": "2026-09-16T18:00:00+09:00",
+    "api_version": "v1",
+    "is_demo": true
+  }
+}

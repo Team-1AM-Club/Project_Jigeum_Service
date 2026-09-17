@@ -7,31 +7,25 @@ Provider 호출 순서 5단계 준수:
 4. 짧은 DB 트랜잭션에서 만료·Idempotency-Key·revision 재확인
 5. domain 상태 변경 + revision 증가 + Idempotency-Key 성공 결과 원자 커밋
 """
+
 import logging
-from typing import Optional, Any
-from app.schemas.journeys import ReplanReason
-from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, and_
 from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationStatus
-from app.models.plan import Plan
+from app.schemas.journeys import ReplanReason
+from app.services.conversation_service import (
+    candidate_set_expired,
+    get_conversation,
+)
 from app.services.idempotency_service import (
-    validate_idempotency_key_format,
-    compute_payload_hash,
-    save_idempotency_record,
-    get_idempotency_record,
     check_idempotency_conflict,
     check_idempotency_hit,
-)
-from app.services.conversation_service import (
-    get_conversation,
-    update_conversation,
-    check_and_handle_expiry,
-    candidate_set_expired,
-    hard_delete_if_eligible,
+    compute_payload_hash,
+    get_idempotency_record,
+    save_idempotency_record,
+    validate_idempotency_key_format,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +35,7 @@ SEOUL_TZ = ZoneInfo("Asia/Seoul")
 # ─────────────────────────────────────────────
 # 일반 상태 변경 검증 (T063)
 # ─────────────────────────────────────────────
+
 
 class StateChangeValidationError(Exception):
     """상태 변경 검증 오류."""
@@ -137,12 +132,16 @@ def validate_state_change_request(
     )
 
     # 같은 key·같은 payload 재요청 → 저장된 응답 반환 (T063)
-    existing_response = check_idempotency_hit(db, conversation_id, validated_ik, expected_hash)
+    existing_response = check_idempotency_hit(
+        db, conversation_id, validated_ik, expected_hash
+    )
     if existing_response is not None:
         return {
             "conversation": conv,
             "idempotency_hit": existing_response,
-            "idempotency_record": get_idempotency_record(db, conversation_id, validated_ik),
+            "idempotency_record": get_idempotency_record(
+                db, conversation_id, validated_ik
+            ),
         }
 
     # 같은 key·다른 payload → 409 IDEMPOTENCY_KEY_REUSED (T063)
@@ -182,6 +181,7 @@ def validate_state_change_request(
 # ─────────────────────────────────────────────
 # T040: US1 특유 검증 (확인 조건 충족 전 plan 요청 차단)
 # ─────────────────────────────────────────────
+
 
 def validate_plan_request_prerequisites(
     conversation: Conversation,
@@ -225,7 +225,7 @@ def validate_plan_request_prerequisites(
         raise StateChangeValidationError(
             error_code="USER_CONFIRMATION_REQUIRED",
             message="사용자 확인(user_confirmed=true) 없이 계획을 계산할 수 없습니다. "
-                    "먼저 조건을 확인하고 확인하세요.",
+            "먼저 조건을 확인하고 확인하세요.",
             status_code=422,
         )
 
@@ -246,6 +246,7 @@ def validate_plan_request_prerequisites(
 # ─────────────────────────────────────────────
 # Idempotency-Key 성공 결과 기록 (5단계 마지막)
 # ─────────────────────────────────────────────
+
 
 def record_idempotency_success(
     db: Session,
@@ -290,12 +291,13 @@ def record_idempotency_success(
 # 재탐색 흐름 조정 로직 (User Story 3 - T054)
 # ─────────────────────────────────────────────
 
+
 def validate_replan_request(
-    previous_plan: Optional[dict],
-    current_origin_place_id: Optional[str],
+    previous_plan: dict | None,
+    current_origin_place_id: str | None,
     reason: ReplanReason,
     user_confirmed: bool,
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """재탐색 요청 검증.
 
     Args:
@@ -312,7 +314,11 @@ def validate_replan_request(
         return False, "사용자 확인이 필요합니다. user_confirmed=true로 재요청하세요."
 
     # 재탐색 사유 검증
-    valid_reasons = [ReplanReason.MISSED_CONNECTION, ReplanReason.ROUTE_CHANGED, ReplanReason.MANUAL]
+    valid_reasons = [
+        ReplanReason.MISSED_CONNECTION,
+        ReplanReason.ROUTE_CHANGED,
+        ReplanReason.MANUAL,
+    ]
     if reason not in valid_reasons:
         return False, f"유효하지 않은 재탐색 사유입니다: {reason}"
 
@@ -324,9 +330,9 @@ def validate_replan_request(
 
 
 def preserve_previous_plan_on_replan_failure(
-    previous_plan: Optional[dict],
-    replan_result: Optional[dict],
-    failure_reason: Optional[str],
+    previous_plan: dict | None,
+    replan_result: dict | None,
+    failure_reason: str | None,
 ) -> dict:
     """재탐색 실패·취소 시 이전 선택 보존.
 
@@ -364,8 +370,8 @@ def preserve_previous_plan_on_replan_failure(
 
 
 def prevent_auto_replacement_of_previous_plan(
-    previous_plan: Optional[dict],
-    new_plan: Optional[dict],
+    previous_plan: dict | None,
+    new_plan: dict | None,
     user_selected: bool = False,
 ) -> dict:
     """이전 계획의 자동 교체 방지.
@@ -401,7 +407,7 @@ class ReplanGuard:
     """재탐색 가드: 이전 선택 보존 및 자동 교체 방지 상태 관리."""
 
     def __init__(self):
-        self._previous_plan: Optional[dict] = None
+        self._previous_plan: dict | None = None
         self._previous_plan_preserved = True
         self._auto_replaced = False
 

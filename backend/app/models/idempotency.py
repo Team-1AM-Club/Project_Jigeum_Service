@@ -5,10 +5,11 @@ T058: IdempotencyRecord 모델 생성
   expected_revision, created_at, response_data
 - conversation_id + idempotency_key UNIQUE 제약 포함
 """
-from sqlalchemy import Column, Integer, String, DateTime, Text
-from sqlalchemy.orm import declarative_base
-from datetime import datetime, timezone
 
+from datetime import UTC, datetime
+
+from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -27,6 +28,7 @@ class IdempotencyRecord(Base):
         response_data: 응답 본문 JSON 직렬화 문자열
         created_at: 기록 생성 시각
     """
+
     __tablename__ = "idempotency_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -37,15 +39,17 @@ class IdempotencyRecord(Base):
     payload_hash = Column(String(64), nullable=False)
     expected_revision = Column(Integer, nullable=True)
     response_data = Column(Text, nullable=True)  # JSON 직렬화 문자열
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
-                        nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
     # conversation_id + idempotency_key UNIQUE 제약
     __table_args__ = (
         # SQLite에서는 UniqueConstraint로 선언
         __import__("sqlalchemy").UniqueConstraint(
-            "conversation_id", "idempotency_key",
-            name="uq_conversation_id_idempotency_key"
+            "conversation_id",
+            "idempotency_key",
+            name="uq_conversation_id_idempotency_key",
         ),
     )
 

@@ -1,0 +1,22 @@
+diff --git a/backend/tests/unit/test_last_journey_service.py b/backend/tests/unit/test_last_journey_service.py
+--- a/backend/tests/unit/test_last_journey_service.py
++++ b/backend/tests/unit/test_last_journey_service.py
+@@ -94,6 +94,7 @@
+         destination_place_id="place_gangnam_station",
+         arrival_deadline=datetime(2026, 9, 17, 0, 30, 0, tzinfo=SEOUL_TZ),
+         arrival_preference_minutes=10,
++        service_date="2026-09-16",
+         max_options=3,
+     )
+ 
+diff --git a/backend/tests/integration/test_last_journey_e2e.py b/backend/tests/integration/test_last_journey_e2e.py
+--- a/backend/tests/integration/test_last_journey_e2e.py
++++ b/backend/tests/integration/test_last_journey_e2e.py
+@@ -275,6 +275,7 @@
+             service.plan_last_journey(
+                 request=TripRequest(
+                     conversation_id="e2e_last_006",
++                    service_date="2026-09-16",
+                     origin_place_id="place_seoul_station",
+                     destination_place_id="place_gangnam_station",
+                     arrival_deadline=datetime(2026, 9, 17, 0, 30, 0, tzinfo=SEOUL_TZ),

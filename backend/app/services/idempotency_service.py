@@ -9,22 +9,21 @@ T061: Idempotency-Key 처리 완성
 - 같은 key·다른 payload → 409 IDEMPOTENCY_KEY_REUSED
 - 누락·형식 오류 → 422 VALIDATION_ERROR
 """
+
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from sqlalchemy import select, UniqueConstraint
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.idempotency import IdempotencyRecord
-from app.models.conversation import Conversation
 
 # UUID v4 패턴: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx (y = 8,9,A,B)
 UUID_V4_PATTERN = re.compile(
-    r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-    re.IGNORECASE
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
 )
 
 
@@ -32,12 +31,13 @@ UUID_V4_PATTERN = re.compile(
 # Payload Hash 계산 (SHA-256)
 # ─────────────────────────────────────────────
 
+
 def compute_payload_hash(
     http_method: str,
     api_path: str,
     conversation_id: str,
-    expected_revision: Optional[int],
-    body: Optional[dict],
+    expected_revision: int | None,
+    body: dict | None,
 ) -> str:
     """HTTP method + 정규화된 path + conversation_id + expected revision +
     canonicalized body → SHA-256.
@@ -59,7 +59,7 @@ def compute_payload_hash(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _canonicalize_body(body: Optional[dict]) -> Optional[dict]:
+def _canonicalize_body(body: dict | None) -> dict | None:
     """body를 정렬 키 JSON으로 canonicalize."""
     if body is None:
         return None
@@ -70,7 +70,8 @@ def _canonicalize_body(body: Optional[dict]) -> Optional[dict]:
 # Idempotency-Key 검증
 # ─────────────────────────────────────────────
 
-def validate_idempotency_key_format(idempotency_key: Optional[str]) -> str:
+
+def validate_idempotency_key_format(idempotency_key: str | None) -> str:
     """Idempotency-Key 형식 검증 (UUID v4, 36자).
 
     Args:
@@ -100,6 +101,7 @@ def validate_idempotency_key_format(idempotency_key: Optional[str]) -> str:
 # Idempotency 기록 저장
 # ─────────────────────────────────────────────
 
+
 def save_idempotency_record(
     db: Session,
     conversation_id: str,
@@ -107,7 +109,7 @@ def save_idempotency_record(
     http_method: str,
     api_path: str,
     expected_revision: int,
-    request_body: Optional[dict],
+    request_body: dict | None,
     response_body: dict,
     response_status: int,
 ) -> IdempotencyRecord:
@@ -144,8 +146,10 @@ def save_idempotency_record(
         path=api_path.rstrip("/").lower(),
         payload_hash=payload_hash,
         expected_revision=expected_revision,
-        response_data=json.dumps(response_body, ensure_ascii=False) if response_body else None,
-        created_at=datetime.now(timezone.utc),
+        response_data=json.dumps(response_body, ensure_ascii=False)
+        if response_body
+        else None,
+        created_at=datetime.now(UTC),
     )
 
     db.add(record)
@@ -158,11 +162,12 @@ def save_idempotency_record(
 # Idempotency 기록 조회
 # ─────────────────────────────────────────────
 
+
 def get_idempotency_record(
     db: Session,
     conversation_id: str,
     idempotency_key: str,
-) -> Optional[IdempotencyRecord]:
+) -> IdempotencyRecord | None:
     """conversation_id + idempotency_key로 record 조회.
 
     Args:
@@ -184,6 +189,7 @@ def get_idempotency_record(
 # ─────────────────────────────────────────────
 # Idempotency 충돌 확인
 # ─────────────────────────────────────────────
+
 
 def check_idempotency_conflict(
     db: Session,
@@ -214,7 +220,7 @@ def check_idempotency_hit(
     conversation_id: str,
     idempotency_key: str,
     expected_payload_hash: str,
-) -> Optional[dict]:
+) -> dict | None:
     """같은 key·같은 payload 재요청 → 저장된 응답 반환.
 
     Args:

@@ -6,25 +6,24 @@
 - 사용자 확인 요구 검증
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
-from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.schemas.journeys import (
-    TripRequest,
     Plan,
+    ReplanReason,
     ReplanRequest,
     ReplanResponse,
-    ReplanReason,
 )
-
-
-from app.services.replan_service import ReplanService
 from app.services.plan_service import PlanService
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
+from app.services.provider_interfaces import RoutingProvider
+from app.services.replan_service import ReplanService
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
+
 
 @pytest.fixture
 def mock_plan_service():
@@ -35,14 +34,16 @@ def mock_plan_service():
     service.routing_provider.search_options = AsyncMock()
     return service
 
+
 @pytest.fixture
 def replan_service(mock_plan_service):
     return ReplanService(plan_service=mock_plan_service)
 
+
 @pytest.fixture(scope="function")
 def valid_replan_request():
     """Valid replan request fixture (module level for all test classes)."""
-        
+
     return ReplanRequest(
         conversation_id="test_replan_001",
         trip={
@@ -51,7 +52,8 @@ def valid_replan_request():
         },
         previous_plan={
             "plan_id": "plan_abc123",
-            "target_arrival_at": "2026-09-16T18:50:00+09:00",
+            "estimated_arrival_at": "2026-09-16T18:50:00+09:00",
+            "selected_option_id": "selected-option",
             "recommended_leave_at": "2026-09-16T18:08:00+09:00",
             "total_duration_minutes": 42,
         },
@@ -60,6 +62,7 @@ def valid_replan_request():
         user_confirmed=True,
         max_options=3,
     )
+
 
 class TestReplanServiceNormalCase:
     """재탐색 서비스 정상 케이스 테스트."""
@@ -76,6 +79,7 @@ class TestReplanServiceNormalCase:
     @pytest.fixture
     def replan_service(self, mock_plan_service):
         return ReplanService(plan_service=mock_plan_service)
+
 
 class TestArrivalChangeCalculation:
     """arrival_change_minutes 계산 검증 테스트."""
@@ -153,9 +157,7 @@ class TestArrivalChangeCalculation:
         assert response.comparison.arrival_change_minutes == 0
 
     @pytest.mark.asyncio
-    async def test_arrival_change_none_when_no_previous_plan(
-        self, replan_service
-    ):
+    async def test_arrival_change_none_when_no_previous_plan(self, replan_service):
         """이전 계획이 없으면 arrival_change_minutes None."""
         request = ReplanRequest(
             conversation_id="test_replan_002",
@@ -184,6 +186,7 @@ class TestArrivalChangeCalculation:
 
         assert response.comparison.arrival_change_minutes is None
 
+
 class TestLeaveChangeCalculation:
     """leave_change_minutes 계산 검증 테스트."""
 
@@ -198,7 +201,9 @@ class TestLeaveChangeCalculation:
             origin_place_id="place_seoul_station",
             destination_place_id="place_gangnam_station",
             target_arrival_at=datetime(2026, 9, 16, 19, 10, 0, tzinfo=SEOUL_TZ),
-            recommended_leave_at=datetime(2026, 9, 16, 18, 28, 0, tzinfo=SEOUL_TZ),  # 이전 18:08 → +20
+            recommended_leave_at=datetime(
+                2026, 9, 16, 18, 28, 0, tzinfo=SEOUL_TZ
+            ),  # 이전 18:08 → +20
             total_duration_minutes=42,
         )
 
@@ -210,6 +215,7 @@ class TestLeaveChangeCalculation:
         assert response.comparison.leave_change_minutes == 20, (
             f"기대 20, 실제 {response.comparison.leave_change_minutes}"
         )
+
 
 class TestPreviousPlanPreservation:
     """이전 선택 보존 검증 테스트."""
@@ -240,9 +246,7 @@ class TestPreviousPlanPreservation:
         assert response.comparison.previous_plan_valid is False
 
     @pytest.mark.asyncio
-    async def test_previous_plan_not_deleted_on_failure(
-        self, replan_service
-    ):
+    async def test_previous_plan_not_deleted_on_failure(self, replan_service):
         """재탐색 실패 시에도 이전 선택 삭제되지 않음."""
         # ReplanService는 실패 시에도 이전 선택을 삭제하지 않음
         # (실제로는 예외 발생 시 이전 선택이 영향을 받지 않음)
@@ -271,6 +275,7 @@ class TestPreviousPlanPreservation:
         # 예외 발생 시에도 이전 계획은 삭제되지 않음 (메모리 상으로만 존재)
         # 이는 서비스 레벨에서 보장됨
 
+
 class TestUserConfirmationRequirement:
     """사용자 확인 요구 검증 테스트."""
 
@@ -290,7 +295,9 @@ class TestUserConfirmationRequirement:
         with pytest.raises(ValueError) as exc_info:
             await replan_service.replan(request=request)
 
-        assert "사용자 확인" in str(exc_info.value) or "user_confirmed" in str(exc_info.value)
+        assert "사용자 확인" in str(exc_info.value) or "user_confirmed" in str(
+            exc_info.value
+        )
 
     @pytest.mark.asyncio
     async def test_replan_succeeds_with_user_confirmation(
@@ -313,6 +320,7 @@ class TestUserConfirmationRequirement:
 
         assert isinstance(response, ReplanResponse)
         assert response.replan_id is not None
+
 
 class TestReplanRequestValidation:
     """재탐색 요청 검증 테스트."""
@@ -351,7 +359,9 @@ class TestReplanRequestValidation:
         with pytest.raises(ValueError) as exc_info:
             await replan_service.replan(request=request)
 
-        assert "origin" in str(exc_info.value).lower() or "출발지" in str(exc_info.value)
+        assert "origin" in str(exc_info.value).lower() or "출발지" in str(
+            exc_info.value
+        )
 
     @pytest.mark.asyncio
     async def test_replan_missing_trip_destination_raises_error(self, replan_service):
@@ -369,7 +379,10 @@ class TestReplanRequestValidation:
         with pytest.raises(ValueError) as exc_info:
             await replan_service.replan(request=request)
 
-        assert "destination" in str(exc_info.value).lower() or "목적지" in str(exc_info.value)
+        assert "destination" in str(exc_info.value).lower() or "목적지" in str(
+            exc_info.value
+        )
+
 
 class TestAutoReplacementPrevention:
     """자동 교체 방지 검증 테스트."""

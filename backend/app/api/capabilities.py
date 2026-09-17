@@ -1,10 +1,14 @@
-from fastapi import APIRouter
-from app.schemas.common import Meta, Envelope
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from fastapi import APIRouter
+
+from app.schemas.common import Envelope, Meta
+from app.schemas.journeys import TripRequest
+
 router = APIRouter()
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
+_OPTION_LIMITS = TripRequest.model_json_schema()["properties"]["max_options"]
 
 
 @router.get("/capabilities")
@@ -25,17 +29,19 @@ async def get_capabilities() -> Envelope:
         },
         "appointment": {
             "supported": True,
-            "max_options": 10,
+            "max_options": _OPTION_LIMITS["maximum"],
             "include_walking": True,
         },
         "last_journey": {
             "supported": True,
         },
-        "transport_modes": ["subway", "bus", "walking", "taxi", "bicycle"],
-        "max_options": 10,
+        "transport_modes": ["subway", "bus"],
+        "max_options": _OPTION_LIMITS["maximum"],
         "defaults": {
+            "arrival_preference_minutes": 0,
+            "transport_modes": ["subway", "bus"],
             "transport_mode": "subway",
-            "max_options": 5,
+            "max_options": _OPTION_LIMITS["default"],
             "radius_meters": 5000,
         },
         "buffer_policy": {

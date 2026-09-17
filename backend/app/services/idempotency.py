@@ -4,12 +4,13 @@
 - payload hash 계산 (SHA-256): HTTP method + 정규화된 path + conversation_id + expected revision + canonicalized body
 - 저장·조회 기능 제공
 """
+
 import hashlib
 import json
-from datetime import datetime, timezone
-from typing import Optional
-from pydantic import BaseModel, Field
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -24,9 +25,9 @@ class IdempotencyRecordResponse(BaseModel):
     payload_hash: str
     http_method: str
     api_path: str
-    expected_revision: Optional[int] = None
-    response_body: Optional[dict] = None
-    response_status: Optional[int] = None
+    expected_revision: int | None = None
+    response_body: dict | None = None
+    response_status: int | None = None
     created_at: datetime
 
 
@@ -34,8 +35,7 @@ class IdempotencyRecordResponse(BaseModel):
 # SQLAlchemy 모델 (T022 부분, 별도 모델 파일로도 정의 가능)
 # 여기서는 서비스 로직에 필요한 최소 모델 포함
 # ─────────────────────────────────────────────
-from sqlalchemy import Column, Integer, String, DateTime, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column, DateTime, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -43,6 +43,7 @@ Base = declarative_base()
 
 class IdempotencyRecord(Base):
     """IdempotencyRecord SQLAlchemy 모델."""
+
     __tablename__ = "idempotency_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -54,7 +55,7 @@ class IdempotencyRecord(Base):
     expected_revision = Column(Integer, nullable=True)
     response_body = Column(Text, nullable=True)  # JSON 직렬화 문자열
     response_status = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 # conversation_id + idempotency_key UNIQUE 제약은
@@ -70,8 +71,8 @@ def compute_payload_hash(
     http_method: str,
     api_path: str,
     conversation_id: str,
-    expected_revision: Optional[int],
-    body: Optional[dict],
+    expected_revision: int | None,
+    body: dict | None,
 ) -> str:
     """HTTP method + 정규화된 path + conversation_id + expected revision + canonicalized body → SHA-256.
 
@@ -88,7 +89,7 @@ def compute_payload_hash(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _canonicalize_body(body: Optional[dict]) -> Optional[dict]:
+def _canonicalize_body(body: dict | None) -> dict | None:
     """body를 정렬 키 JSON으로 canonicalize."""
     if body is None:
         return None
@@ -104,9 +105,9 @@ async def save_idempotency_record(
     idempotency_key: str,
     http_method: str,
     api_path: str,
-    expected_revision: Optional[int],
-    body: Optional[dict],
-    response_body: Optional[dict],
+    expected_revision: int | None,
+    body: dict | None,
+    response_body: dict | None,
     response_status: int,
 ) -> IdempotencyRecord:
     """IdempotencyRecord 생성·저장.
@@ -130,7 +131,7 @@ async def save_idempotency_record(
         expected_revision=expected_revision,
         response_body=json.dumps(response_body) if response_body else None,
         response_status=response_status,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     db_session.add(record)
     db_session.flush()
@@ -142,12 +143,16 @@ async def get_idempotency_record(
     db_session,
     conversation_id: str,
     idempotency_key: str,
-) -> Optional[IdempotencyRecord]:
+) -> IdempotencyRecord | None:
     """conversation_id + idempotency_key로 record 조회."""
-    return db_session.query(IdempotencyRecord).filter(
-        IdempotencyRecord.conversation_id == conversation_id,
-        IdempotencyRecord.idempotency_key == idempotency_key,
-    ).first()
+    return (
+        db_session.query(IdempotencyRecord)
+        .filter(
+            IdempotencyRecord.conversation_id == conversation_id,
+            IdempotencyRecord.idempotency_key == idempotency_key,
+        )
+        .first()
+    )
 
 
 async def check_idempotency_conflict(

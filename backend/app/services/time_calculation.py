@@ -5,14 +5,14 @@
 - 시간대·자정 경계 처리: Asia/Seoul 기준, 날짜 변경 시 올바른 날짜 계산
 - 운행일 구분: 날짜 경계 처리로 운행일 넘어감 방지
 """
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
 
-def ensure_seoul(dt: Optional[datetime]) -> Optional[datetime]:
+def ensure_seoul(dt: datetime | None) -> datetime | None:
     """datetime을 Asia/Seoul 시간대로 변환.
 
     aware datetime이면 Seoul로 변환, naive면 local로 가정하고 Seoul tz 적용.
@@ -110,7 +110,7 @@ def check_date_boundary_crossing(
     from_dt: datetime,
     to_dt: datetime,
     allow_crossing: bool = True,
-) -> Optional[str]:
+) -> str | None:
     """날짜 경계 넘김 검사.
 
     Args:
@@ -179,12 +179,16 @@ def calculate_plan_times(
     # target_arrival_at = arrival_deadline - total_duration (buffer 미포함)
     # → buffer는 recommended_leave_at 계산 시에만 적용
 
-    recommended_leave_at = target_arrival_at - timedelta(minutes=total_duration_minutes + effective_buffer)
+    recommended_leave_at = target_arrival_at - timedelta(
+        minutes=total_duration_minutes + effective_buffer
+    )
 
     return {
         "target_arrival_at": target_arrival_at.astimezone(SEOUL_TZ),
         "recommended_leave_at": recommended_leave_at.astimezone(SEOUL_TZ),
         "buffer_applied": effective_buffer,
         "total_with_buffer": total_with_buffer,
-        "note": "buffer 중복 가산 없음" if effective_buffer > 0 else "buffer 없음 (이미 이동시간에 포함)",
+        "note": "buffer 중복 가산 없음"
+        if effective_buffer > 0
+        else "buffer 없음 (이미 이동시간에 포함)",
     }

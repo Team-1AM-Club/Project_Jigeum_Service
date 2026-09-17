@@ -1,0 +1,262 @@
+{
+  "format_version": 1,
+  "feature": "004-public-transit-api-integration",
+  "baseline": {
+    "commit": "5caef80e443a6bd694b8dd5cd8b274348ae4ad82",
+    "overlay": "Docs/confirm-mcp-integration/confirm-mcp-integration.patch",
+    "overlay_sha256_lf": "9260e791086b68f598d68fb85b2c427ed761e699fe2b48f1c84a857607008167",
+    "recipient_head": "44f61169c050255268ba855c6074a15bb8000a6f",
+    "comparison": "baseline commit plus received integration patch; not a diff against recipient HEAD alone"
+  },
+  "encoding": "UTF-8, LF, without BOM for file checksum comparison",
+  "scope": "Source/backend foundations/operator/station row normalization/evidence research/synthetic tests/approved contracts. No secrets, MCP-owned files, deployment files, unrelated 003/005 work or environment files.",
+  "patches": [
+    {
+      "patch": "01-source.patch",
+      "sha256": "663d22fa496ce99371067f9dc4a06ecd136b89e29e1f8e541c2e8703a73cef0c",
+      "files": [
+        {
+          "path": "backend/app/schemas/common.py",
+          "change": "modify",
+          "baseline_sha256_lf": "be506ec9a80c321425bd88fba3df0e26583b6f0e628a3e45924dea9ea7dd47e6",
+          "target_sha256_lf": "b0b0fac6fcd3924db93551e4e2dfaa5d07a99bc20c00e020844f59bd3bc7352a"
+        },
+        {
+          "path": "backend/app/schemas/journeys.py",
+          "change": "modify",
+          "baseline_sha256_lf": "35b90a93320e23c5c71abc46f07527655edf8c4b634a861a664d9781da291555",
+          "target_sha256_lf": "01e35f5162a9230c6c04540f493793f7156fb02f605b8204113b413e6c9967ae"
+        },
+        {
+          "path": "backend/app/services/routing_search.py",
+          "change": "modify",
+          "baseline_sha256_lf": "77e6f072646a20b7691779373f0f794f45ee7243ba1aa337f2134f5bcf88e4bc",
+          "target_sha256_lf": "ea2b26ce0ce8cff6540e9c8ba3426d758b1ff8447af1541bfae264d7277d3a9b"
+        },
+        {
+          "path": "backend/app/services/plan_service.py",
+          "change": "modify",
+          "baseline_sha256_lf": "e13192261f78c1f21577cd755dce6d507d2b0c1916ae922b8e80b0d073d584b2",
+          "target_sha256_lf": "45608dad71532dd4c94769d0ef8383421d763ff8b34c14c47953d9e896ebea67"
+        },
+        {
+          "path": "backend/app/services/last_journey_service.py",
+          "change": "modify",
+          "baseline_sha256_lf": "395905b5d63ae2ff270be2f6473ef468b5c74232e76432b6e2bcb731a7bf4db7",
+          "target_sha256_lf": "264edcefc429c259c4d27c6ed9c65848cf4a9959c4ba4668c9485d584f88b87d"
+        },
+        {
+          "path": "backend/app/services/provider_interfaces.py",
+          "change": "modify",
+          "baseline_sha256_lf": "2065120d3e2d28d1f0ce02eda24d1e4d3e7d837300c5c3b986217be10eed72c3",
+          "target_sha256_lf": "89753c7377c0aaddc3369527fb12940d0b1f82ef497f352765dd5eca21d77f2a"
+        }
+      ]
+    },
+    {
+      "patch": "02-provider-client.patch",
+      "sha256": "e49d66147d826b08b98d79f35745fc37e3bd436d704fcb4308e8420e87835f45",
+      "files": [
+        {
+          "path": "backend/app/services/provider_client.py",
+          "change": "modify",
+          "baseline_sha256_lf": "33cf1d08cfd4691a21417b14d13dfa6a81e64952ccbeeb43a70e489303361ea3",
+          "target_sha256_lf": "8ceefe86f801d21d2e4fe64e671c14ed4351e7e3275fa6cfe491ceab9a71b5a7"
+        }
+      ]
+    },
+    {
+      "patch": "03-settings-lifespan.patch",
+      "sha256": "2ef5f9180edf05621bf112ad414b7f24e19e2f6e2fecd9d6ffb5103a9440d578",
+      "files": [
+        {
+          "path": "backend/app/config.py",
+          "change": "modify",
+          "baseline_sha256_lf": "8ea430a4efc13b5b6ed1dbe60b7b84f495a451f8d35f4174135b119e38e01a77",
+          "target_sha256_lf": "4c7171eb94bdf9049daaed54089fb0cfaabb142ff255cc17c01c0b2afd7c723e"
+        },
+        {
+          "path": "backend/app/main.py",
+          "change": "modify",
+          "baseline_sha256_lf": "9b3fad86c986cbae779aced138bfa13c5a4c12706be010289df0c631559ca081",
+          "target_sha256_lf": "0341b728f0e17c18abfa7971ee7915b8391f6697c7ed49ab02fe8cec28336372"
+        },
+        {
+          "path": "backend/.dockerignore",
+          "change": "modify",
+          "baseline_sha256_lf": "2e176dfda220979da846191b269b19dbb0ced2503cb6687ffbea21e327607ea7",
+          "target_sha256_lf": "c91274ebb3f67ea77022ecbc2d0ac3bfa8389e5f7f330c53bc7ff60afa3c1924"
+        }
+      ]
+    },
+    {
+      "patch": "04-domain-operator.patch",
+      "sha256": "3b939e9c2619c1b8b19b8c3695fc115084b2923b19c7dcaa52e7f957856368db",
+      "files": [
+        {
+          "path": "backend/app/domain/transit.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "dc606f87e0cdca36531adfbd9e374a4649a327d8843e7813387028d1d84db66c"
+        },
+        {
+          "path": "backend/app/integrations/verify_transit.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "812b61ad4afb892e6123df5119bef0d3ba813b441faa5829f4ab2107ef689c0a"
+        }
+      ]
+    },
+    {
+      "patch": "05-provider-tests.patch",
+      "sha256": "f7d146aa6fd39258ca4753b1872e90d861c7d37697af58934911422469fa7c09",
+      "files": [
+        {
+          "path": "backend/tests/unit/test_provider_client.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "c2d631bf22392465b84d8cb2291b3c4831070c73c82999d673a50086cd7ab8ba"
+        },
+        {
+          "path": "backend/tests/unit/test_transit_secret_redaction.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "af284d3418f804f25a5d43239e8cb2817aa8628a3cb0aca042f65f13b14e6df1"
+        },
+        {
+          "path": "backend/tests/unit/test_provider_lifespan.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "972093492f5a740f4aa31d65650da6df3c91fec7569a181be34b366ac7ba9890"
+        }
+      ]
+    },
+    {
+      "patch": "06-domain-settings-tests.patch",
+      "sha256": "5b2beedf1d9db2ec78060b0684c4307fef8d4a372a8d8ee665fa9a2aeef7d699",
+      "files": [
+        {
+          "path": "backend/tests/unit/test_transit_domain.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "64fa669a15c3722dfc154a7b176a6df42798019dd2c6e70a09c1b01a8494a29f"
+        },
+        {
+          "path": "backend/tests/unit/test_transit_settings.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "b25d991da3762efadd648c0e51b08628f03b6c94adb7a2facdb3e8432ad79af8"
+        },
+        {
+          "path": "backend/tests/unit/test_verify_transit.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "d783fb695edfad6cfe5d2a8caa8fff85a2921a32a0dc25d507b36cc7da5674b1"
+        }
+      ]
+    },
+    {
+      "patch": "07-source-contract-tests.patch",
+      "sha256": "17d3dc0f6a17b954395ae0affd248cb63ad6e12502b1e5e06b00a7c7f0633bbe",
+      "files": [
+        {
+          "path": "backend/tests/contract/test_transit_source_contract.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "114c53a5d44aa2b8a59aa664eeeafec0a4e79ecfb4c27bce6dc1c5c93600aa06"
+        }
+      ]
+    },
+    {
+      "patch": "08-contract-examples.patch",
+      "sha256": "b0742537b87890c5f514705f4e3c628fc3bb89c8738784308df895fbde817f3b",
+      "files": [
+        {
+          "path": "API_SPEC.md",
+          "change": "modify",
+          "baseline_sha256_lf": "11e49bc28ca028a138c7f3a0e5e5cb33c74b145a0892333ea27d794e420e6de9",
+          "target_sha256_lf": "9fc53236a8d9d7606311aeb996a28a1120779bc45815595e31f09eff2821bce1"
+        },
+        {
+          "path": "Docs/api/examples.json",
+          "change": "modify",
+          "baseline_sha256_lf": "c1fc3accbb859dd5330c9b33a1d75a27053510942320647a5d25de72280706c0",
+          "target_sha256_lf": "4434e41698111e33aa39f48249998d236ad494252159cdb75d0ce05d2454dd32"
+        },
+        {
+          "path": "specs/004-public-transit-api-integration/contracts/transit-integration.md",
+          "change": "modify",
+          "baseline_sha256_lf": "9a7a8c011fab2d6093f3ba7611a400650065a9911eed29de293986dac4d6d31f",
+          "target_sha256_lf": "97ef58b2500d53f1da7322ebac99b124bf479e551db066e29c9c5d2db3308f5a"
+        },
+        {
+          "path": "specs/004-public-transit-api-integration/contracts/flat-plan-proposal.json",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "23a1701db8b0ab82d147d5b76b62a40f6a5cc9a38ea2fedfd47a139bcf604405"
+        }
+      ]
+    },
+    {
+      "patch": "09-capability-limits.patch",
+      "sha256": "1945e6afc05f74ae5b5e70679b948a4428df353fa2ecf1746e10be59bc6419d2",
+      "files": [
+        {
+          "path": "backend/app/api/capabilities.py",
+          "change": "modify",
+          "baseline_sha256_lf": "5fb49447eda7792c6cd766fa7f62e4be701b492f5c5a7d4ae96778054cb8b713",
+          "target_sha256_lf": "a149370b5047cfb4a212669252c3456ad9b723c2c7d509719f4eaa0832387dca"
+        },
+        {
+          "path": "backend/tests/contract/test_transit_capabilities.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "8f1146e14fc9e6f299966643dd480aace89c8755061cc8d51fcd6ffde1c9121e"
+        }
+      ]
+    },
+    {
+      "patch": "10-station-normalization.patch",
+      "sha256": "65d2c01a6f52b10031334c1a07577f25ba495ae9890a915286a97b91a03a9bb4",
+      "files": [
+        {
+          "path": "backend/app/integrations/seoul_subway.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "8764642cf6b63d97c8923af8854282452beceab853af697859a0295ee291c8ef"
+        },
+        {
+          "path": "backend/tests/unit/test_seoul_subway.py",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "eb3b55a182386eae385e7a03f12f7a21a027952faae79af64d66d3cf9f0bc22d"
+        }
+      ]
+    },
+    {
+      "patch": "11-basis-calendar-research.patch",
+      "sha256": "06674355ecf7618c760d15ca47a0b7ad9472d34b9865da0abb48aee4fc6a03b4",
+      "files": [
+        {
+          "path": "specs/004-public-transit-api-integration/data-model.md",
+          "change": "modify",
+          "baseline_sha256_lf": "3545096987dddc2af9853982d313b2c63887030c3628d107218a241b316f5adf",
+          "target_sha256_lf": "698b3b190ac57e98844dad0003e462d77ef6647552f094517ea23fd18b68faf7"
+        },
+        {
+          "path": "specs/004-public-transit-api-integration/research.md",
+          "change": "modify",
+          "baseline_sha256_lf": "12f4499f1ae2ce85d33b75949a824a147026246dc71f9b277eecb99759c68681",
+          "target_sha256_lf": "8ec69800a52c835508aca984a8333abe81e9869a928c015ff8042abfb3f91c51"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "reverse_apply_check": "passed against current worktree",
+    "latest_backend": "340 passed, 13 warnings; synthetic/Mock, recorded before packaging",
+    "latest_mcp_http": "7 tests OK; synthetic",
+    "provider_calls": "6 subway minimum probes succeeded; 4 bus probes HTTP401; not normalized or planning verified"
+  },
+  "uncommitted": true
+}

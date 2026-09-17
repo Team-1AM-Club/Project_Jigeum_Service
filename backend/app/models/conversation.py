@@ -3,11 +3,14 @@
 T057: 대화 상태 관리 모델 - conversation_id (PK), revision, expires_at,
 confirmed_conditions, candidate_set, active_selected_plan, updated_at, created_at.
 """
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Enum as SQLEnum
-from sqlalchemy.orm import declarative_base
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+
 import enum
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.orm import declarative_base
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -17,8 +20,9 @@ def _ensure_aware_utc(dt):
     if dt is None:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
+
 
 Base = declarative_base()
 
@@ -43,13 +47,20 @@ class Conversation(Base):
         updated_at: 마지막 갱신 시각
         status: active/expired/tombstone
     """
+
     __tablename__ = "conversations"
 
     conversation_id = Column(String(36), primary_key=True, nullable=False)
     revision = Column(Integer, nullable=False, default=1)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
     _expires_at = Column("expires_at", DateTime(timezone=True), nullable=True)
     confirmed_conditions = Column(JSON, nullable=True)
+    interpret_draft = Column(JSON, nullable=True)
+    unresolved_fields = Column(JSON, nullable=True)
+    conditions_confirmed = Column(Boolean, nullable=False, default=False)
+    places_confirmed = Column(Boolean, nullable=False, default=False)
 
     @property
     def expires_at(self):
@@ -58,11 +69,17 @@ class Conversation(Base):
     @expires_at.setter
     def expires_at(self, value):
         self._expires_at = value
+
     candidate_set = Column(JSON, nullable=True)
     active_selected_plan = Column(JSON, nullable=True)
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
-    status = Column(SQLEnum(ConversationStatus), nullable=False, default=ConversationStatus.ACTIVE)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+    status = Column(
+        SQLEnum(ConversationStatus), nullable=False, default=ConversationStatus.ACTIVE
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -71,6 +88,10 @@ class Conversation(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "confirmed_conditions": self.confirmed_conditions,
+            "interpret_draft": self.interpret_draft,
+            "unresolved_fields": self.unresolved_fields,
+            "conditions_confirmed": self.conditions_confirmed,
+            "places_confirmed": self.places_confirmed,
             "candidate_set": self.candidate_set,
             "active_selected_plan": self.active_selected_plan,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

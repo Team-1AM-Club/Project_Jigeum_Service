@@ -1,0 +1,86 @@
+{
+  "format_version": 1,
+  "feature": "004-public-transit-api-integration",
+  "baseline": {
+    "commit": "5caef80e443a6bd694b8dd5cd8b274348ae4ad82",
+    "overlay": "Docs/confirm-mcp-integration/confirm-mcp-integration.patch",
+    "previous_source_zip": "transit-source-integration-20260916.zip",
+    "previous_source_zip_sha256": "27c2f110f2b91a6fe0ebafcadc4d609054d2a7fb00852c0e52ef033a4cb2c5cd",
+    "comparison": "recipient state after applying the prior 11 Source patches; no later parallel implementation"
+  },
+  "encoding": "UTF-8, LF, without BOM for file checksum comparison",
+  "scope": "Missing shared Source schema, two service_date-only fixture fixes, one omitted HTTP Source replay test, related existing MCP Source validator and four Source tests. No Buffer/provider expansion or secrets.",
+  "patches": [
+    {
+      "patch": "01-shared-schema.patch",
+      "sha256": "64f77975a7a7c2c1bd7dac4367c988fb7969b6c2626982cf5a1d99c3f8b9592f",
+      "files": [
+        {
+          "path": "Docs/api/source-envelope.schema.json",
+          "change": "add",
+          "baseline_sha256_lf": null,
+          "target_sha256_lf": "1cfe09c17caab5605af606376df01142f99131b58afe823d7e63a681bf6f280b"
+        }
+      ]
+    },
+    {
+      "patch": "02-deterministic-dates.patch",
+      "sha256": "707e03c41bea81ed86b960fe1c81f0a7fa214393e8d6916e5928b6b49c5f152d",
+      "files": [
+        {
+          "path": "backend/tests/unit/test_last_journey_service.py",
+          "change": "modify",
+          "baseline_sha256_lf": "49cecd6391996335892eb994214b701c800169d97c9f3c5beb7695c64264f5cb",
+          "target_sha256_lf": "28ba9906f531797729ec053472e3b3a49230ab975714f62183df51648c3b901d"
+        },
+        {
+          "path": "backend/tests/integration/test_last_journey_e2e.py",
+          "change": "modify",
+          "baseline_sha256_lf": "bd2945dac5cb529b75540cd17491bc6320c2dd78f763be378bf3e81a4d1edb90",
+          "target_sha256_lf": "f2a49968f10319ed99be5bdb40f4dea61d06a808f38abd66f9c0713ff6e195bf"
+        }
+      ]
+    },
+    {
+      "patch": "03-missing-http-source-test.patch",
+      "sha256": "fcd68ab77502cb7cfbc039bd6859f29fefcf3b2e32e0d0daefc13613f4681973",
+      "files": [
+        {
+          "path": "backend/tests/integration/test_confirmation_http.py",
+          "change": "modify",
+          "baseline_sha256_lf": "124130449b29fd8b43bfbb50d186adfa5163d6d2bee62b5c5b793c1c9b67841f",
+          "target_sha256_lf": "2807a6caf7159135701d2d27df039ce2b09a398ae0395b87554380a76aad6967"
+        }
+      ]
+    },
+    {
+      "patch": "04-mcp-source-validation.patch",
+      "sha256": "0198ad3ee2b0db99f921eabc840c9ffdf6371baee8790fa21f12c5aa06df7792",
+      "files": [
+        {
+          "path": "mcp-server/backend_mcp_server.py",
+          "change": "modify",
+          "baseline_sha256_lf": "aa25a5b850ee04ebbfc2f9dc6526980a74759df9d27d6f4197fc7f7ce7eca223",
+          "target_sha256_lf": "4c2171a5ab5b0e940c2290d56752106ec4ce944aa2bb419f1bb72febcb058087"
+        },
+        {
+          "path": "mcp-server/tests/test_backend_http.py",
+          "change": "modify",
+          "baseline_sha256_lf": "a919dc00c4b4d52b0eb6a0bd68740df3c133a83b2d78fd223eeb25199537a361",
+          "target_sha256_lf": "5fd2518266f77731cee43d87284353351473df7f9ebd09ada7c376a45c3775b9"
+        }
+      ]
+    }
+  ],
+  "backend_test_counts": {
+    "before": 360,
+    "after": 361,
+    "missing_node": "tests/integration/test_confirmation_http.py::test_candidate_sources_survive_http_and_idempotent_replay"
+  },
+  "dependencies": {
+    "new_requirement_files": [],
+    "mcp_version": "2.0.0",
+    "jsonschema_required_by_mcp": ">=4.20.0",
+    "verified_jsonschema_runtime": "4.26.0"
+  }
+}

@@ -1,118 +1,127 @@
-"""Mobility API 라우터 - interpret + 대화 상태 연동.
+"""Persist interpretation drafts and explicit confirmation separately."""
 
-T066: interpret 응답에 conversation_id, revision, expires_at 포함.
-"""
-import logging
-import uuid
-from fastapi import APIRouter, HTTPException, Header, Response
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from fastapi import APIRouter, Depends, Header, Request
+from sqlalchemy.orm import Session
 
-from app.schemas.mobility import (
-    InterpretRequest,
-    InterpretResponse,
-)
-from app.schemas.errors import ErrorCode
-from app.schemas.common import Envelope, Meta
+from app.db import get_db
+from app.schemas.mobility import InterpretRequest
+from app.services.confirmation import FIELDS, ConfirmRequest, complete_draft
+from app.services.http_state import Operation, StateError
 from app.services.interpret_service import InterpretService
-from app.api.responses import success_response, error_response
-
-logger = logging.getLogger(__name__)
-SEOUL_TZ = ZoneInfo("Asia/Seoul")
+from app.services.mock.mock_providers import MockModelProvider, MockPlaceProvider
 
 router = APIRouter()
-
-# Mock 모델 제공자 (실제 구현 시 LLM 기반 제공자로 교체)
-from app.services.mock.mock_providers import MockModelProvider
 mock_model_provider = MockModelProvider()
 interpret_service = InterpretService(model_provider=mock_model_provider)
 
 
-def validate_idempotency_key(key: str | None) -> str:
-    """Idempotency-Key 헤더 검증 (UUID v4, 36자).
-    검증 실패 시 ValueError를 raise → 호출부에서 error_response로 처리.
-    """
-    if not key:
-        raise ValueError("Idempotency-Key 헤더가 필수입니다.")
-    try:
-        uid = uuid.UUID(key)
-        if uid.version != 4:
-            raise ValueError("UUID 버전 4만 허용")
-    except (ValueError, AttributeError):
-        raise ValueError("Idempotency-Key는 유효한 UUID v4 (36자)여야 합니다.")
-    return key
-
-
-@router.post("/mobility/interpret", response_model=Envelope, status_code=200)
+@router.post("/mobility/interpret")
 async def mobility_interpret(
     request_body: InterpretRequest,
-    idempotency_key: str | None = Header(default=None, include_in_schema=False),
-    response: Response = None,
-) -> Envelope:
-    """자연어 입력 → TripDraft + 확인 질문 해석 (T066 완성).
-
-    - 자연어 입력을 받아 TripDraft로 변환
-    - 확인이 필요한 항목(장소 등)에 대한 확인 질문 반환
-    - 응답 meta에 conversation_id, revision, expires_at 포함 (T066)
-    - 응답 헤더에 Idempotency-Key 반환 (SC-013)
-    - Envelope에 Idempotency-Key 중복 포함 금지 (SC-014)
-    """
-    # Idempotency-Key 검증
-    ikey = validate_idempotency_key(idempotency_key)
-
-    # 입력 검증
-    if not request_body.natural_language or not request_body.natural_language.strip():
-        return error_response(
-            error_code=ErrorCode.VALIDATION_ERROR,
-            message="자연어 입력이 필요합니다.",
-            status_code=422,
+    request: Request,
+    idempotency_key: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    if not request_body.natural_language.strip():
+        raise StateError("VALIDATION_ERROR", message="자연어 입력이 필요합니다.")
+    op = Operation(
+        db,
+        idempotency_key,
+        request.url.path,
+        await request.json(),
+        request_body.conversation_id,
+        request_body.expected_revision,
+        create=True,
+    )
+    conv, replay = op.check()
+    if replay is not None:
+        return replay
+    previous = conv.confirmed_conditions if conv else None
+    op.release()
+    interpreted = await interpret_service.interpret(request_body)
+    draft = interpreted.trip_draft.model_dump(mode="json")
+    mode = draft.get("transport_mode")
+    modes = [{"walking": "walk"}.get(mode, mode)] if mode else ["subway", "bus"]
+    draft.update(kind="appointment", service_date=None, transport_modes=modes)
+    draft.update({k: v for k, v in request_body.context.items() if k in FIELDS})
+    draft["ambiguities"] = request_body.context.get(
+        "ambiguities", draft.get("ambiguities", [])
+    )
+    if "transport_modes" in request_body.context:
+        draft["transport_mode"] = None
+    normalized = complete_draft(draft)
+    unresolved = [
+        k for k in ("origin_place_id", "destination_place_id") if not draft.get(k)
+    ]
+    ambiguities = draft["ambiguities"]
+    if not isinstance(ambiguities, list) or any(
+        not isinstance(item, str) for item in ambiguities
+    ):
+        raise StateError(
+            "VALIDATION_ERROR", message="ambiguities must be an array of field names"
         )
-
-    conversation_id = request_body.conversation_id or ""
-
-    try:
-        response_data = await interpret_service.interpret(request_body)
-
-        # 응답을 dict로 직렬화
-        response_dict = {
-            "trip_draft": response_data.trip_draft.model_dump(mode="json"),
-            "confirmation_questions": [
-                q.model_dump(exclude_none=True) for q in response_data.confirmation_questions
-            ],
-            "requires_confirmation": response_data.requires_confirmation,
-            "next_action": response_data.next_action,
-        }
-
-        # ─────────────────────────────────────────────
-        # T066: meta에 conversation_id, revision, expires_at 포함
-        # ─────────────────────────────────────────────
-        meta = Meta(
-            server_time=datetime.now(SEOUL_TZ).isoformat(),
-            api_version="v1",
-            is_demo=True,
-            conversation_id=conversation_id,
-            revision=1,  # interpret 단계에서는 revision=1 (새 대화 생성 시)
-            expires_at=(datetime.now(SEOUL_TZ) + __import__("datetime").timedelta(days=1)).isoformat(),
+    unresolved.extend(ambiguities)
+    for field in ("origin_place_id", "destination_place_id"):
+        if draft.get(field) and not MockPlaceProvider().resolves(draft[field]):
+            unresolved.append(field)
+    if normalized is None:
+        unresolved.append("conditions")
+    unchanged = normalized is not None and normalized == previous and not unresolved
+    updates = dict(interpret_draft=draft, unresolved_fields=unresolved)
+    if not unchanged:
+        updates.update(
+            confirmed_conditions=None,
+            conditions_confirmed=False,
+            places_confirmed=False,
         )
+    data = dict(
+        trip_draft=draft,
+        requires_confirmation=True,
+        ready_for_plan=normalized is not None and not unresolved,
+        missing_fields=unresolved,
+        confirmation_questions=[
+            q.model_dump(mode="json") for q in interpreted.confirmation_questions
+        ],
+        next_action="confirm",
+    )
+    return op.finish(data, updates, status="needs_confirmation")
 
-        # 응답 헤더에 Idempotency-Key 반환 (SC-013)
-        if response:
-            response.headers["Idempotency-Key"] = ikey
 
-        # Envelope에 Idempotency-Key 중복 포함 금지 (SC-014)
-        return success_response(data=response_dict, meta=meta)
-
-    except ValueError as e:
-        logger.warning(f"해석 요청 검증 실패: {e}")
-        return error_response(
-            error_code=ErrorCode.VALIDATION_ERROR,
-            message=str(e),
-            status_code=422,
-        )
-    except Exception as e:
-        logger.error(f"해석 중 오류: {e}", exc_info=True)
-        return error_response(
-            error_code=ErrorCode.AI_UNAVAILABLE,
-            message="자연어 해석 중 오류가 발생했습니다.",
-            status_code=503,
-        )
+@router.post("/conversations/{conversation_id}/confirm")
+async def confirm(
+    conversation_id: str,
+    request_body: ConfirmRequest,
+    request: Request,
+    idempotency_key: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    op = Operation(
+        db,
+        idempotency_key,
+        request.url.path,
+        await request.json(),
+        conversation_id,
+        request_body.expected_revision,
+    )
+    conv, replay = op.check()
+    if replay is not None:
+        return replay
+    conditions = request_body.confirmed_data.model_dump(mode="json")
+    if (
+        not conv.interpret_draft
+        or conv.unresolved_fields
+        or complete_draft(conv.interpret_draft) != conditions
+    ):
+        raise StateError("USER_CONFIRMATION_REQUIRED")
+    return op.finish(
+        dict(
+            confirmed_conditions=conditions,
+            conditions_confirmed=True,
+            places_confirmed=True,
+        ),
+        dict(
+            confirmed_conditions=conditions,
+            conditions_confirmed=True,
+            places_confirmed=True,
+        ),
+    )

@@ -1,28 +1,55 @@
-from fastapi import FastAPI, Request, Header, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
+from contextlib import asynccontextmanager
 from uuid import UUID
-from app.api.health import router as health_router
-from app.api.capabilities import router as capabilities_router
-from app.api.places import router as places_router
-from app.api.mobility import router as mobility_router
-from app.api.journeys import router as journeys_router
-from app.schemas.common import Envelope, Meta
-from app.config import get_settings
-from datetime import datetime
 from zoneinfo import ZoneInfo
-import hashlib
-import json
+
+import httpx
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.api.capabilities import router as capabilities_router
+from app.api.health import router as health_router
+from app.api.journeys import router as journeys_router
+from app.api.mobility import router as mobility_router
+from app.api.places import router as places_router
+from app.config import get_settings
+from app.lifecycle import lifespan as database_lifespan
+from app.services.http_state import StateError, envelope
+from app.services.provider_client import ProviderClient
 
 settings = get_settings()
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """HTTP 연결 자원은 앱 수명 동안 공유하고 종료 시 해제한다."""
+    async with httpx.AsyncClient(
+        follow_redirects=False, trust_env=False
+    ) as http_client:
+        application.state.provider_http_client = http_client
+        application.state.provider_client = ProviderClient(http_client=http_client)
+        async with database_lifespan(application):
+            yield
+
 
 app = FastAPI(
     title="Jigeum API",
     version=settings.api_version,
     docs_url="/docs",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
+
+
+@app.exception_handler(StateError)
+async def state_error_handler(request: Request, exc: StateError):
+    return JSONResponse(
+        status_code=exc.status,
+        content=envelope(status="error", code=exc.code, message=exc.message),
+    )
+
 
 # CORS
 app.add_middleware(
@@ -42,7 +69,9 @@ async def get_idempotency_key(
 ) -> str:
     """Idempotency-Key 헤더 파싱. UUID v4 36자 검증."""
     if not idempotency_key:
-        raise HTTPException(status_code=422, detail="Idempotency-Key 헤더가 필수입니다.")
+        raise HTTPException(
+            status_code=422, detail="Idempotency-Key 헤더가 필수입니다."
+        )
     try:
         uid = UUID(idempotency_key)
         if uid.version != 4:
@@ -79,13 +108,13 @@ app.include_router(mobility_router, prefix="/api/v1")
 app.include_router(journeys_router, prefix="/api/v1")
 
 
-
 # ─────────────────────────────────────────────
 # RequestValidationError 핸들러 (Pydantic 검증 오류 → envelope)
 # ─────────────────────────────────────────────
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     from fastapi.responses import JSONResponse
+
     details = []
     for error in exc.errors():
         loc = ".".join(str(l) for l in error.get("loc", []))
@@ -102,7 +131,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 "status_code": 422,
                 "details": details,
             },
-            "meta": {"api_version": settings.api_version},
+            "meta": envelope()["meta"],
         },
     )
 
@@ -113,16 +142,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     from fastapi.responses import JSONResponse
+
     status_code = exc.status_code
     detail = exc.detail
     if isinstance(detail, list):
-        details = [{"field": d.get("loc", ["body"])[0] if isinstance(d, dict) else "body",
-                    "message": d.get("msg", str(d)) if isinstance(d, dict) else str(d)}
-                   for d in detail]
+        details = [
+            {
+                "field": d.get("loc", ["body"])[0] if isinstance(d, dict) else "body",
+                "message": d.get("msg", str(d)) if isinstance(d, dict) else str(d),
+            }
+            for d in detail
+        ]
         message = "요청 검증에 실패했습니다."
     elif isinstance(detail, dict):
-        details = [{"field": str(d.get("loc", ["body"])[0] if isinstance(d, dict) else "body"),
-                    "message": str(d.get("msg", ""))}]
+        details = detail.get("details", [])
         message = detail.get("message", "요청 처리 중 오류가 발생했습니다.")
     else:
         details = []
@@ -140,7 +173,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 "details": details,
                 "status_code": status_code,
             },
-            "meta": {"api_version": settings.api_version},
+            "meta": envelope()["meta"],
         },
     )
 
@@ -151,8 +184,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     from fastapi.responses import JSONResponse
+
     status_code = getattr(exc, "status_code", 500)
-    detail = getattr(exc, "detail", str(exc))
+    detail = "서버 내부 오류가 발생했습니다."
     return JSONResponse(
         status_code=status_code,
         content={
@@ -163,6 +197,6 @@ async def global_exception_handler(request: Request, exc: Exception):
                 "message": detail,
                 "status_code": status_code,
             },
-            "meta": {"api_version": settings.api_version},
+            "meta": envelope()["meta"],
         },
     )

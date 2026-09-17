@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jigeum Source response compatibility contract",
+  "description": "Source and warnings are optional for legacy candidates; present values are validated. Source/DataWarning definitions must match backend models.",
+  "type": "object",
+  "properties": {
+    "data": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/Plan"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "Source": {
+      "additionalProperties": false,
+      "description": "제공처 기준시각과 조회시각을 분리하는 전환 호환 출처.",
+      "properties": {
+        "provider": {
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "basis": {
+          "enum": [
+            "schedule",
+            "realtime",
+            "demo"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "basis_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Basis At"
+        },
+        "retrieved_at": {
+          "format": "date-time",
+          "title": "Retrieved At",
+          "type": "string"
+        },
+        "service_date": {
+          "format": "date",
+          "title": "Service Date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "basis",
+        "retrieved_at",
+        "service_date"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "DataWarning": {
+      "additionalProperties": false,
+      "description": "후보별 자료 한계를 전달하는 공개 경고.",
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "DataWarning",
+      "type": "object"
+    },
+    "Candidate": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Source"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DataWarning"
+          }
+        }
+      }
+    },
+    "Plan": {
+      "type": "object",
+      "properties": {
+        "comparison": {
+          "type": "object",
+          "properties": {
+            "options": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Candidate"
+              }
+            },
+            "new_plan": {
+              "$ref": "#/$defs/Plan"
+            }
+          }
+        }
+      }
+    }
+  }
+}

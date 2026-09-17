@@ -5,14 +5,15 @@
 - Buffer 계산 검증: buffer 중복 가산 방지
 """
 
-import pytest
-from datetime import datetime, timezone
+from datetime import datetime
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
-from unittest.mock import AsyncMock, MagicMock
 
-from app.schemas.journeys import TripRequest, Plan, PlanSummary, Comparison
+import pytest
+
+from app.schemas.journeys import Comparison, Plan, TripRequest
 from app.services.plan_service import PlanService
-from app.services.provider_interfaces import RoutingProvider, ProviderResult
+from app.services.provider_interfaces import ProviderResult, RoutingProvider
 
 SEOUL_TZ = ZoneInfo("Asia/Seoul")
 
@@ -71,7 +72,9 @@ class TestPlanServiceNormalCase:
         )
 
     @pytest.mark.asyncio
-    async def test_plan_returns_plan_with_recommended_leave_at(self, plan_service, valid_request):
+    async def test_plan_returns_plan_with_recommended_leave_at(
+        self, plan_service, valid_request
+    ):
         """정상 요청 → Plan 반환, 권장 출발시각 계산됨.
 
         target_arrival_at = arrival_deadline - arrival_preference_minutes
@@ -91,11 +94,15 @@ class TestPlanServiceNormalCase:
 
         # target_arrival_at = 19:00 - 10분(preference) = 18:50
         expected_target = datetime(2026, 9, 16, 18, 50, 0, tzinfo=SEOUL_TZ)
-        assert plan.target_arrival_at == expected_target,             f"target_arrival_at 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        assert plan.target_arrival_at == expected_target, (
+            f"target_arrival_at 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        )
 
         # recommended_leave_at = 18:50 - 42분(이동) - 5분(buffer) = 18:03
         expected_leave = datetime(2026, 9, 16, 18, 3, 0, tzinfo=SEOUL_TZ)
-        assert plan.recommended_leave_at == expected_leave,             f"recommended_leave_at 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        assert plan.recommended_leave_at == expected_leave, (
+            f"recommended_leave_at 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        )
 
         # recommended_leave_at < target_arrival_at
         assert plan.recommended_leave_at < plan.target_arrival_at
@@ -132,7 +139,7 @@ class TestPlanServiceNormalCase:
                     "transport_mode": "bus",
                     "confidence": 0.85,
                 },
-            ]
+            ],
         )
 
         plan = await plan_service.plan(request=valid_request, buffer_minutes=5)
@@ -156,17 +163,24 @@ class TestPlanServiceNormalCase:
         plan_service.routing_provider.search_options.return_value = ProviderResult(
             ok=True,
             data=[
-                {"option_id": f"opt_{i}", "legs": [], "total_duration_minutes": 30 + i * 5,
-                 "transport_mode": "subway", "confidence": 0.9}
+                {
+                    "option_id": f"opt_{i}",
+                    "legs": [],
+                    "total_duration_minutes": 30 + i * 5,
+                    "transport_mode": "subway",
+                    "confidence": 0.9,
+                }
                 for i in range(5)
-            ]
+            ],
         )
 
         # max_options=2
         valid_request.max_options = 2
         plan = await plan_service.plan(request=valid_request, buffer_minutes=5)
 
-        assert len(plan.comparison.options) == 2,             f"max_options=2 기대, 실제 {len(plan.comparison.options)}개"
+        assert len(plan.comparison.options) == 2, (
+            f"max_options=2 기대, 실제 {len(plan.comparison.options)}개"
+        )
 
 
 class TestPlanServiceMissingOrigin:
@@ -186,6 +200,7 @@ class TestPlanServiceMissingOrigin:
         """API 레벨: origin_place_id 빈 값 → 422 (Pydantic + 라우터 검증)."""
         # FastAPI TestClient 사용
         from fastapi.testclient import TestClient
+
         from app.main import app
 
         with TestClient(app) as c:
@@ -200,7 +215,9 @@ class TestPlanServiceMissingOrigin:
             )
 
             # Pydantic이 빈 문자열을 차단 (422)
-            assert response.status_code == 422,                 f"빈 origin_place_id 422 기대, 실제 {response.status_code}"
+            assert response.status_code == 422, (
+                f"빈 origin_place_id 422 기대, 실제 {response.status_code}"
+            )
 
     @pytest.mark.asyncio
     async def test_plan_service_valid_origin_required(self, plan_service):
@@ -211,13 +228,15 @@ class TestPlanServiceMissingOrigin:
 
         plan_service.routing_provider.search_options.return_value = ProviderResult(
             ok=True,
-            data=[{
-                "option_id": "opt_test",
-                "legs": [],
-                "total_duration_minutes": 30,
-                "transport_mode": "subway",
-                "confidence": 0.9,
-            }]
+            data=[
+                {
+                    "option_id": "opt_test",
+                    "legs": [],
+                    "total_duration_minutes": 30,
+                    "transport_mode": "subway",
+                    "confidence": 0.9,
+                }
+            ],
         )
 
         request = TripRequest(
@@ -278,11 +297,15 @@ class TestPlanServiceBufferCalculation:
 
         # 20:00 - 0(선호) = 20:00 (target)
         expected_target = datetime(2026, 9, 16, 20, 0, 0, tzinfo=SEOUL_TZ)
-        assert plan.target_arrival_at == expected_target,             f"target_arrival_at 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        assert plan.target_arrival_at == expected_target, (
+            f"target_arrival_at 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        )
 
         # 20:00 - 30분(이동) - 5분(buffer) = 19:25
         expected_leave = datetime(2026, 9, 16, 19, 25, 0, tzinfo=SEOUL_TZ)
-        assert plan.recommended_leave_at == expected_leave,             f"recommended_leave_at 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        assert plan.recommended_leave_at == expected_leave, (
+            f"recommended_leave_at 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        )
 
         # buffer_applied = 5
         assert plan.buffer_applied == 5
@@ -303,11 +326,15 @@ class TestPlanServiceBufferCalculation:
 
         # target = 19:00 - 0 = 19:00
         expected_target = datetime(2026, 9, 16, 19, 0, 0, tzinfo=SEOUL_TZ)
-        assert plan.target_arrival_at == expected_target,             f"buffer=0 target 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        assert plan.target_arrival_at == expected_target, (
+            f"buffer=0 target 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        )
 
         # leave = 19:00 - 30분 = 18:30
         expected_leave = datetime(2026, 9, 16, 18, 30, 0, tzinfo=SEOUL_TZ)
-        assert plan.recommended_leave_at == expected_leave,             f"buffer=0 leave 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        assert plan.recommended_leave_at == expected_leave, (
+            f"buffer=0 leave 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        )
 
         assert plan.buffer_applied == 0
 
@@ -332,11 +359,15 @@ class TestPlanServiceBufferCalculation:
 
         # target = 19:00 - 10분(선호) = 18:50
         expected_target = datetime(2026, 9, 16, 18, 50, 0, tzinfo=SEOUL_TZ)
-        assert plan.target_arrival_at == expected_target,             f"target 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        assert plan.target_arrival_at == expected_target, (
+            f"target 기대 {expected_target}, 실제 {plan.target_arrival_at}"
+        )
 
         # leave = 18:50 - 30분(이동) - 5분(buffer) = 18:15
         expected_leave = datetime(2026, 9, 16, 18, 15, 0, tzinfo=SEOUL_TZ)
-        assert plan.recommended_leave_at == expected_leave,             f"leave 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        assert plan.recommended_leave_at == expected_leave, (
+            f"leave 기대 {expected_leave}, 실제 {plan.recommended_leave_at}"
+        )
 
         # buffer_applied = 5
         assert plan.buffer_applied == 5
@@ -352,8 +383,8 @@ class TestPlanServiceWithNoProviderResult:
         return PlanService(routing_provider=provider)
 
     @pytest.mark.asyncio
-    async def test_plan_falls_back_to_mock_when_no_options(self, plan_service):
-        """라우팅 결과 없음 → Mock 옵션 생성."""
+    async def test_plan_reports_unavailable_when_no_options(self, plan_service):
+        """빈 결과를 가상 경로로 대체하지 않는다."""
         request = TripRequest(
             conversation_id="test_fallback",
             origin_place_id="place_seoul_station",
@@ -362,9 +393,7 @@ class TestPlanServiceWithNoProviderResult:
             max_options=3,
         )
 
-        plan = await plan_service.plan(request=request, buffer_minutes=5)
+        from app.services.last_journey_service import NoFeasibleJourneyError
 
-        # Mock 옵션 생성됨
-        assert len(plan.comparison.options) >= 1
-        assert plan.comparison.options[0].option_id.startswith("opt_")
-        assert plan.total_duration_minutes > 0
+        with pytest.raises(NoFeasibleJourneyError):
+            await plan_service.plan(request=request, buffer_minutes=5)
