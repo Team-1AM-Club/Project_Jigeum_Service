@@ -1,0 +1,30 @@
+# 로컬 인증키를 이미지에 포함하지 않습니다.
+.env
+.env.*
+**/.env
+**/.env.*
+
+# 로컬 실행 환경과 테스트 산출물
+.venv
+venv
+.test_venv*
+**/.venv
+**/venv
+**/.test_venv*
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.pyc
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+.git
+.codex
+.agents
+**/*credentials*.json
+**/*service-account*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/*.log

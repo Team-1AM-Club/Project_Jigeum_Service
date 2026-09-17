@@ -1,0 +1,32 @@
+{
+  "baseline_total": 360,
+  "total": 361,
+  "by_file": {
+    "tests/contract/test_conversations.py": 39,
+    "tests/contract/test_journeys_plan.py": 5,
+    "tests/contract/test_journeys_plan_last_journey.py": 5,
+    "tests/contract/test_journeys_replan.py": 9,
+    "tests/contract/test_replan_service_contract.py": 16,
+    "tests/contract/test_transit_capabilities.py": 1,
+    "tests/contract/test_transit_source_contract.py": 34,
+    "tests/integration/test_confirmation_http.py": 25,
+    "tests/integration/test_conversations_e2e.py": 32,
+    "tests/integration/test_journeys_e2e.py": 7,
+    "tests/integration/test_journeys_plan_e2e.py": 8,
+    "tests/integration/test_last_journey_e2e.py": 7,
+    "tests/integration/test_replan_e2e.py": 12,
+    "tests/unit/test_last_journey_service.py": 8,
+    "tests/unit/test_plan_service.py": 9,
+    "tests/unit/test_provider_client.py": 27,
+    "tests/unit/test_provider_lifespan.py": 2,
+    "tests/unit/test_replan_service.py": 14,
+    "tests/unit/test_seoul_subway.py": 12,
+    "tests/unit/test_time_calculation.py": 15,
+    "tests/unit/test_transit_domain.py": 18,
+    "tests/unit/test_transit_secret_redaction.py": 9,
+    "tests/unit/test_transit_settings.py": 15,
+    "tests/unit/test_verify_transit.py": 32
+  },
+  "added_node": "tests/integration/test_confirmation_http.py::test_candidate_sources_survive_http_and_idempotent_replay",
+  "source": "isolated recipient baseline plus supplement; not later parallel working tree"
+}

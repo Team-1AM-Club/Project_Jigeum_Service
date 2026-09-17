@@ -1,0 +1,464 @@
+diff --git a/API_SPEC.md b/API_SPEC.md
+--- a/API_SPEC.md
++++ b/API_SPEC.md
+@@ -1,4 +1,25 @@
+ # 지금 — MCP 서비스용 백엔드 계산 API 명세 v0.1
++
++## 004 공공데이터 연동 공동 승인 계약 — 2026-09-16
++
++이 절은 사용자 전달 공동 합의와 후속 배치 승인을 기록한다. 아래 confirm 구현 계약의 경로·확인·revision·멱등성은 보존한다. Source와 후보별 상세·Buffer 계산은 승인된 변경 목표이며 해당 구현·계약 테스트가 끝나기 전에는 구현 완료로 해석하지 않는다. 초기 설계의 data.plan 및 최대 후보 3 제안은 적용하지 않는다.
++
++- 후보 기본 3개, 요청 범위 1~5개. HTTP MCP는 confirm_trip 포함 6개 도구다. confirm과 journeys/plan/last_journey 경로를 보존한다.
++- envelope의 data는 flat Plan이다. data.recommended_option_id는 상위 요약의 추천 후보 ID이며 사용자 선택과 구분한다. data.comparison.selected_option_id는 사용자 선택 전 null이다.
++- Source·Buffer·legs·warnings와 estimated_arrival_at·hard_leave_at은 data.comparison.options[] 후보마다 배치한다. 상위 요약은 추천 후보와 일치해야 한다. 전체 합성 예시는 Docs/api/examples.json의 transit_flat_plan_004다.
++- Source.basis_at은 전환 입력 optional, 신규 출력에는 null 포함 항상 제공한다. 유효한 시각은 ISO 8601 +09:00이다. null/누락은 제공처 기준시각 미확인으로 처리하며 retrieved_at으로 대체하지 않는다. 날짜만 있는 자료에 임의 시각을 만들지 않는다. 기준시각 미검증 실시간은 현재 운행 계산에서 제외한다. 정적 기준일·적용일은 정확한 경고로 전달한다.
++- Buffer.policy_version=transit-initial-5m-v1, item.code=initial_boarding_margin이다. 첫 승차 전 safety_buffer wait 5분을 여정당 한 번 포함한다. item.leg_id는 해당 wait를 참조한다. total_duration_minutes는 이 5분을 포함한 구간 합이다. 기존 추가 5분 차감은 제거하며 buffer_applied는 추천 후보 buffer.total_minutes와 같다. 이동·대기 40분 + Buffer 5분은 총 45분, 목표 18:50이면 출발 18:05다.
++- 제공처 retry는 백엔드가 담당한다. MCP는 반환된 429·502·503·504를 자동 재시도하지 않는다. 응답 유실 재시도는 같은 멱등 키·본문·revision을 사용하며 진행 중/완료 재생의 외부 추가 조회 0회를 검증한다. 조정의 프로세스/인스턴스 보장 범위도 기록한다.
++
++최종 합의 이력은 specs/004-public-transit-api-integration/contracts/transit-integration.md §9를 따른다. 실제 제공처 호출·계산·Hermes 표시 검증은 합성 JSON 및 승인만으로 완료 처리하지 않는다.
++
++### Source·warnings 공유 수신 검증 — 2026-09-16
++
++사용자는 공유 Source Schema와 MCP 수신 검증 구현을 승인했다. `Docs/api/source-envelope.schema.json`의 Source/DataWarning 정의는 백엔드 모델과 계약 테스트로 일치시킨다. MCP는 flat Plan과 재탐색의 `comparison.new_plan` 안의 후보별 출처·경고를 검사한다. 기존 후보의 sources/warnings 누락과 Source.basis_at 누락/null은 전환 입력으로 허용하며 값을 보충하지 않는다. 필드가 있으면 타입·필수 출처 필드·추가 필드 금지·날짜/aware datetime 형식을 검사한다.
++
++검증 실패는 기존 `UPSTREAM_RESPONSE_INVALID`를 반환하며 응답 원문·검증 예외 내용을 노출하거나 자동 재시도하지 않는다. 새 오류 코드나 003의 미승인 diagnostics 계약을 추가하지 않는다. SDK가 광고하는 outputSchema는 기존 일반 object를 유지하며 상세 검증은 MCP의 HTTP 수신 경계에서 수행한다.
++
++정적 출처와 일치하는 내부 Evidence의 기준일·개정·적용 시작/종료일은 후보의 `SOURCE_REFERENCE` 경고로 전달한다. 확인된 항목만 표시하며 자료 적용 적합성·실시간 현재성을 검증한 것으로 승격하지 않는다.
+ 
+ ## 2026-09-16 확인 상태 구현 계약
+ 
+diff --git a/Docs/api/examples.json b/Docs/api/examples.json
+--- a/Docs/api/examples.json
++++ b/Docs/api/examples.json
+@@ -1,6 +1,11 @@
+ {
+   "fixture_version": "0.2.0",
+-  "description": "Solar가 격리 DB와 Mock provider로 실행한 HTTP 예제. 오류 예제는 provider 장애를 주입했다. 현재 API 구현 형태이며 요청 순서와 revision을 유지한다.",
++  "source_contract": {
++    "schema": "source-envelope.schema.json",
++    "legacy": "sources/warnings 및 basis_at 누락은 전환 입력으로 허용하며 값을 만들지 않는다.",
++    "invalid_response": "출처·경고·날짜 형식 불일치는 MCP에서 UPSTREAM_RESPONSE_INVALID로 반환하고 재시도하지 않는다."
++  },
++  "description": "Solar가 격리 DB와 Mock provider로 실행한 HTTP 예제. 오류 예제는 provider 장애를 주입했다. 요청 순서와 revision을 유지한다. transit_flat_plan_004는 별도의 공동 승인 응답 계약으로 실제 실행 예제가 아니다.",
+   "registered_routes": [
+     {
+       "method": "GET",
+@@ -36,6 +41,131 @@
+     }
+   ],
+   "cases": [
++    {
++      "id": "transit_flat_plan_004",
++      "description": "004 승인된 합성 응답 계약. 실행 fixture 또는 실제 운행 검증이 아니다.",
++      "method": null,
++      "path": null,
++      "headers": {},
++      "request": null,
++      "http_status": null,
++      "response": {
++        "status": "ok",
++        "data": {
++          "plan_id": "demo_plan_contract_review",
++          "conversation_id": "demo_conversation_contract_review",
++          "origin_place_id": "demo_station_start",
++          "destination_place_id": "demo_station_end",
++          "arrival_deadline": "2026-09-16T19:00:00+09:00",
++          "target_arrival_at": "2026-09-16T18:50:00+09:00",
++          "recommended_leave_at": "2026-09-16T18:05:00+09:00",
++          "total_duration_minutes": 45,
++          "transport_mode": "subway",
++          "recommended_option_id": "demo_option_1",
++          "comparison": {
++            "options": [
++              {
++                "option_id": "demo_option_1",
++                "recommended_leave_at": "2026-09-16T18:05:00+09:00",
++                "target_arrival_at": "2026-09-16T18:50:00+09:00",
++                "total_duration_minutes": 45,
++                "transport_mode": "subway",
++                "reasoning": "합성 계약 예시: 이동·대기 40분과 첫 승차 전 여유 5분을 합쳐 45분. 출발 18:05, 도착 18:50.",
++                "estimated_arrival_at": "2026-09-16T18:50:00+09:00",
++                "hard_leave_at": null,
++                "buffer": {
++                  "policy_version": "transit-initial-5m-v1",
++                  "total_minutes": 5,
++                  "items": [
++                    {
++                      "code": "initial_boarding_margin",
++                      "minutes": 5,
++                      "leg_id": "demo_buffer_leg",
++                      "reason": "첫 승차 전 5분, 여정당 한 번"
++                    }
++                  ]
++                },
++                "legs": [
++                  {
++                    "leg_id": "demo_buffer_leg",
++                    "mode": "wait",
++                    "from": {
++                      "name": "시연 출발역",
++                      "latitude": 37.5,
++                      "longitude": 127
++                    },
++                    "to": {
++                      "name": "시연 출발역",
++                      "latitude": 37.5,
++                      "longitude": 127
++                    },
++                    "departure_at": "2026-09-16T18:05:00+09:00",
++                    "arrival_at": "2026-09-16T18:10:00+09:00",
++                    "duration_minutes": 5,
++                    "transit": null,
++                    "wait_reason": "safety_buffer"
++                  },
++                  {
++                    "leg_id": "demo_ride_leg",
++                    "mode": "subway",
++                    "from": {
++                      "name": "시연 출발역",
++                      "latitude": 37.5,
++                      "longitude": 127
++                    },
++                    "to": {
++                      "name": "시연 도착역",
++                      "latitude": 37.6,
++                      "longitude": 127.1
++                    },
++                    "departure_at": "2026-09-16T18:10:00+09:00",
++                    "arrival_at": "2026-09-16T18:50:00+09:00",
++                    "duration_minutes": 40,
++                    "transit": {
++                      "line_name": "시연 노선",
++                      "direction": "시연 도착역 방면",
++                      "headsign": "시연 도착역",
++                      "service_id": "DEMO001"
++                    },
++                    "wait_reason": null
++                  }
++                ],
++                "sources": [
++                  {
++                    "provider": "synthetic-contract-fixture",
++                    "basis": "demo",
++                    "basis_at": null,
++                    "retrieved_at": "2026-09-16T18:00:00+09:00",
++                    "service_date": "2026-09-16"
++                  }
++                ],
++                "warnings": [
++                  {
++                    "code": "DEMO_DATA",
++                    "message": "역·좌표·노선·운행편·시각은 모두 합성 계약 예시이며 실제 운행 근거가 아닙니다."
++                  }
++                ]
++              }
++            ],
++            "selected_option_id": null,
++            "comparison_reason": "권장 후보와 사용자 선택은 구분한다. 선택 전 selected_option_id는 null."
++          },
++          "buffer_applied": 5,
++          "notes": "배치 승인된 합성 계약 예시. 실제 조회·계산 성공 또는 구현 완료의 증거가 아니다.",
++          "is_last_journey": false,
++          "operating_date": null,
++          "arrival_date": null,
++          "last_journey_supported": false
++        },
++        "error": null,
++        "meta": {
++          "request_id": "00000000-0000-4000-8000-000000000001",
++          "server_time": "2026-09-16T18:00:00+09:00",
++          "api_version": "v1",
++          "is_demo": true
++        }
++      }
++    },
+     {
+       "id": "health",
+       "method": "GET",
+@@ -85,7 +215,7 @@
+           },
+           "appointment": {
+             "supported": true,
+-            "max_options": 10,
++            "max_options": 5,
+             "include_walking": true
+           },
+           "last_journey": {
+@@ -95,7 +225,7 @@
+             "subway",
+             "bus"
+           ],
+-          "max_options": 10,
++          "max_options": 5,
+           "defaults": {
+             "arrival_preference_minutes": 0,
+             "transport_modes": [
+@@ -103,7 +233,7 @@
+               "bus"
+             ],
+             "transport_mode": "subway",
+-            "max_options": 5,
++            "max_options": 3,
+             "radius_meters": 5000
+           },
+           "buffer_policy": {
+diff --git a/specs/004-public-transit-api-integration/contracts/transit-integration.md b/specs/004-public-transit-api-integration/contracts/transit-integration.md
+--- a/specs/004-public-transit-api-integration/contracts/transit-integration.md
++++ b/specs/004-public-transit-api-integration/contracts/transit-integration.md
+@@ -1,6 +1,6 @@
+ # 공공 교통 연동 계약 및 기준시각 변경안
+ 
+-작성일: 2026-09-16. **변경안 작성은 사용자 승인, 공개 계약 반영은 공동 개발자 합의 대기**다. 이 문서는 `API_SPEC.md`를 대체하지 않으며 현재 코드/예제를 변경하지 않았다.
++작성일: 2026-09-16. **공동 합의와 후속 배치 승인 완료**, 최종 기준은 §9다. API_SPEC.md·예제 JSON에 승인 목표를 반영했고 구현·실제 검증 상태는 별도로 기록한다. 이 문서는 API_SPEC.md를 대체하지 않는다.
+ 
+ ## 1. 기존 공개 인터페이스 보존
+ 
+@@ -15,7 +15,7 @@
+ 
+ 새 사용자용 교통 조회 HTTP endpoint나 MCP 도구를 추가하지 않는다. 개별 6+4 서비스 조회·정규화 검증은 내부 Adapter와 백엔드 운영자 검증 모듈에서 실행한다. 이 모듈은 독립 제품 클라이언트가 아니다.
+ 
+-공개 envelope는 status/data/error/meta, transport_modes는 subway/bus, 연결 구간은 walk/wait, 후보 상한은 3을 유지한다. 실제 조회 실패에 is_demo=true 후보를 반환하지 않는다. 확인·선택·revision·멱등성 계약은 현재 `API_SPEC.md`와 기존 003을 기준으로 영향받는 경로만 정합화한다.
++공개 envelope는 status/data/error/meta, transport_modes는 subway/bus, 연결 구간은 walk/wait, 후보 기본 3개·요청 상한 5개를 유지한다. 실제 조회 실패에 is_demo=true 후보를 반환하지 않는다. 확인·선택·revision·멱등성 계약은 현재 `API_SPEC.md`의 confirm 구현 계약과 §9 승인 기준으로 영향받는 경로만 정합화한다.
+ 
+ ## 2. Source.basis_at 변경안
+ 
+@@ -81,3 +81,118 @@
+ 입력·확인·conversation/revision/idempotency 검증 → DB 쓰기 트랜잭션 밖 provider 호출 → 결과 검증 → 짧은 트랜잭션에서 만료/revision/멱등성 재검증 → 기존 상태 적용 순서를 보존한다. 실패·취소·상태 충돌은 이전 선택과 TTL/revision을 변경하지 않는다. 성공 재생은 외부 조회 0회다.
+ 
+ 각 API 조회 성공, 실제 약속 성공, 실제 막차 성공은 별도의 증거다. 현재 전부 미실행이며 버스 미래 운행/보행 자료 확보 전에는 관련 SC-007~009를 통과로 표시하지 않는다.
++
++## 6. 데이터 기준 수용과 실제 통합 게이트
++
++SC-002는 모든 기록에서 출처/근거 유형/실제·Demo/기준 확인 여부를 보존하고 계산에 사용한 근거가 유형별 사용 조건을 충족하는지를 검증한다. realtime basis_at=null은 기준 미확인으로 기록할 수 있지만 현재 운행 계산의 근거로 인정하지 않는다. static/schedule 기준일만 제공되면 내부 reference_date/revision/validity/service_date와 정확한 공개 경고를 유지하고 basis_at에 임의 자정 시각을 채우지 않는다. basis_at의 공개 계약 반영은 여전히 공동 합의 대기다.
++
++최초 실제 키 호출 전 공통 전송과 운영자 출력의 합성 sentinel 보호 검증을 통과한다. Source/Buffer 등 공개 출력 경로를 연결하면 해당 경로도 합성 보호 테스트를 통과해야 한다. 공동 개발자는 초기 최소 약속과 최종 인수 시 다른 환경의 Hermes + Solar Pro4에서 도구 발견/호출/응답 수신/표시를 확인하고 Schema 검사와 별도의 실행 증거를 남긴다. 기존 배포 연결 상태도 검증/미검증으로 기록하며 새 배포를 수행하는 계약은 아니다.
++
++## 7. 공동 개발자 전달용 합의 요청
++
++2026-09-16 사용자 확인: **공동 합의 전**. 아래 내용은 검토할 제안이며 승인 기록이 아니다. 이 문서가 합의 내용의 단일 기준이며, 별도 문서에 같은 계약을 복제하지 않는다.
++
++### 변경 목적과 범위
++
++현재 Source의 retrieved_at은 조회시각이다. 제공처 데이터의 생성·관측 시각을 표현하기 위해 basis_at을 추가한다. 기존 API 경로·MCP 도구·응답 envelope·후보 상한·사용자 확인/선택 규칙은 유지한다. 공개 계약 변경 전 양쪽 개발자가 아래 항목을 확정해야 한다.
++
++| 결정 항목 | 검토 제안 | 합의 상태 |
++|---|---|---|
++| 필드 필수 여부 | 전환 중 수신 스키마는 optional. 변경된 백엔드의 신규 응답은 null을 포함해 항상 출력. 최종 required 전환은 별도 합의 | 대기 |
++| null 및 누락 | null은 제공처 기준시각 미확인. 전환 중 누락도 미확인으로 처리하며 조회시각으로 대체하지 않음 | 대기 |
++| 시간대·직렬화 | 유효한 값은 Asia/Seoul aware datetime, JSON은 ISO 8601의 +09:00 offset. 날짜만 있으면 timestamp로 만들지 않음 | 대기 |
++| 실시간 계산 사용 | 기준시각/예측 의미/사용 제한을 검증한 관측만 사용. null·해석 불가·설명되지 않는 미래 시각·지난 예측·규칙 미확정은 제외 | 대기 |
++| 정적·시간표 근거 | 원문 기준일·개정·적용 범위·운행일을 내부 보존하고 정확한 공개 warnings로 전달. basis_at에 임의 자정 금지 | 대기 |
++| 이전 응답 수신 | basis_at 없는 기존 fixture/서버 응답을 전환 중 수신 가능하게 하되 기준시각 미확인으로 표시 | 대기 |
++| 새 응답 수신 | MCP의 엄격한 JSON Schema가 새 필드를 허용하도록 조정하고 양쪽 계약 테스트에서 null/유효시각을 검증 | 대기 |
++| Safety Buffer 표현 | 기존 Buffer 구조 사용. policy_version은 transit-initial-5m-v1 제안. 첫 승차 전 wait에 5분을 여정당 한 번 포함하고 item의 code는 initial_boarding_margin 제안, leg_id는 해당 wait를 참조 | 대기 |
++| Buffer 합계·표시 | total_minutes=5, item 합=5, legs/total_duration에 이미 포함. 실제 보행·scheduled wait와 구분하고 표시에서 재차감 금지 | 대기 |
++
++### 양쪽에서 확인할 사례
++
++- 제공처 기준시각이 확인된 실시간 Source와 basis_at=null인 Source를 각각 수신·표시한다. 후자는 현재 운행 계산에 사용하지 않는다.
++- 기존 응답에서 basis_at이 누락된 사례를 수신하고 미확인으로 처리한다.
++- 정적 기준일만 있는 시간표는 정확한 기준일/적용 경고를 표시하며 임의 timestamp를 생성하지 않는다.
++- 19:00 Deadline/도착 여유 10분의 목표 도착은 18:50이다. 첫 승차 전 Buffer 5분은 구간과 총 소요에 한 번만 반영한다.
++- 합성 자격증명이 응답·로그·오류·Hermes 표시로 노출되지 않는지 확인한다.
++
++### 합의 기록과 적용 순서
++
++현재 백엔드 담당·MCP 담당의 승인과 합의 시각은 **미확인**이다. 수정 의견이 있으면 이 표의 제안을 갱신하고 최종 항목별 결정, 양쪽 승인, 합의 날짜를 기록한다. 문서를 전달하거나 검토했다는 사실만으로 승인으로 간주하지 않는다.
++
++합의 완료 후 T016을 완료 처리하고 T017의 API_SPEC.md·Docs/api/examples.json 갱신, T018~T019의 양쪽 스키마/계약 검증 및 구현을 진행한다. 합의 전에는 공개 Source·MCP Schema·계산 정책 계약을 변경하지 않는다. T029/T077의 다른 환경 Hermes 실제 검증은 별도 실행 증거가 필요하다.
++
++## 9. 최종 승인 및 통합 소스 수령 — 2026-09-16
++
++사용자는 후보 기본 3개·요청 상한 5개 보존과 flat-plan-proposal.json의 후보별 상세 배치를 승인했다. §7~8의 대기 기록은 이전 검토 이력이며 이 절이 현재 합의 기준이다. basis_at은 전환 입력 optional, 신규 출력은 null 포함 항상 제공한다. 유효한 시각은 ISO 8601 +09:00이며 null/누락을 retrieved_at으로 대체하지 않는다. 정적 기준일에 시각을 만들지 않으며 기준시각 미검증 실시간 자료는 현재 운행 계산에서 제외한다.
++
++data는 flat Plan을 유지한다. sources·buffer·legs·warnings·estimated_arrival_at·hard_leave_at은 data.comparison.options[]에 배치한다. data.recommended_option_id는 상위 요약에 대응하는 후보이며 사용자 선택과 다르다. selected_option_id는 사용자 선택 전 null이다. buffer_applied는 추천 후보의 buffer.total_minutes와 같아야 한다.
++
++transit-initial-5m-v1의 initial_boarding_margin은 첫 승차 전 safety_buffer wait에 여정당 한 번 5분 배정하며 구간 합과 total_duration_minutes에 포함한다. 별도 추가 5분 차감은 제거한다. 이동·대기 40분 + Buffer 5분이면 총 45분, 목표 도착 18:50이면 출발 18:05다.
++
++통합 소스는 Docs/confirm-mcp-integration/confirm-mcp-integration.patch로 수령했다. 전체 git apply --check는 main.py만 충돌했고 해당 파일 제외 검사는 통과했다. 47개 파일을 적용하고 main.py의 HTTP·DB lifespan과 오류 계약을 수동 병합했다. confirm과 기존 last_journey 라우트, HTTP MCP 6개 도구를 보존한다. 003의 다른 제안 계약은 자동 적용하지 않는다.
++
++제공처 retry는 백엔드만 담당한다. MCP는 반환된 429·502·503·504를 재시도하지 않는다. 응답 유실 재시도는 같은 멱등 키·본문·revision을 사용하며 완료 재생뿐 아니라 진행 중 재요청의 외부 조회 0회도 별도 검증한다. 현재 합성 전송의 중복 제거는 단일 RequestBudget 범위이며 HTTP 멱등성의 프로세스/인스턴스 보장 증거를 대신하지 않는다.
++
++현재 검증: 백엔드 287 passed, 13 warnings. verify_backend_stdio.py 종료 0, 6개 도구와 확인·계획·재탐색·막차 흐름 통과. 모두 Mock/합성 기반이며 실제 제공처·Hermes·배포는 미검증이다. 내부 도메인과 Source 클래스/기본 계약 테스트를 추가했다. 공개 후보 상세 변환과 Buffer 기존 계산 변경·양쪽 엄격한 수신/표시·진행 중 HTTP 멱등성의 외부 중복 방지는 후속 작업이다.
++
++## 8. 사용자 전달 공동 합의와 통합본 차이 — 2026-09-16
++
++사용자가 공동 합의 내용을 전달했다. §7의 미합의 기록은 전달 전 시점의 기록이며, 아래 내용이 현재 판단 기준이다. **basis_at의 의미와 Buffer 정책은 합의됐지만 응답 배치·후보 상한·confirm 라우트의 통합본 대응은 추가 확인 중**이다. T016 전체 완료 및 T017의 공개 계약 갱신으로 자동 전환하지 않는다.
++
++| 항목 | 전달된 합의 | 구현 상태 |
++|---|---|---|
++| basis_at | 전환 수신 optional, 새 백엔드 응답은 null 포함 항상 출력. 누락/null은 미확인, 조회시각 대체 금지 | 공개 응답 배치 확인 대기 |
++| 시각 | 유효값은 ISO 8601 +09:00. 날짜만 있으면 임의 시각 금지. 기준 미검증 실시간은 현재 계산 제외 | 내부/공개 후속 검증 필요 |
++| Buffer | transit-initial-5m-v1 및 initial_boarding_margin 사용 가능. 총 소요에 포함하면 기존 별도 5분 차감 제거. wait·합계·표시·계산 공동 검증 | 40+5=45분, 목표 18:50→출발 18:05. 계산 구현 전 |
++| HTTP MCP·라우트 | confirm_trip을 포함한 6개 도구, confirm 및 기존 막차 전용 라우트 보존 | 이 체크아웃에서 confirm 라우트/HTTP MCP 코드는 발견되지 않음. 통합본 경로·요청/응답 대응 확인 필요 |
++| 후보 수 | 현재 기본 3·요청 상한 5. 상한 3은 기존 보존이 아니라 변경 | 기존 상한 5 보존 또는 명시적 3 변경 확인 대기 |
++| 응답 | 현재 HTTP data는 flat Plan. Source/Buffer/legs/warnings 전체 JSON 예시 필요 | 아래 합성 예시 제공. 배치 승인 전 공개 schema 변경 금지 |
++| 003 | 현재 구현과 003 제안 차이를 구분하고 자동 적용 금지 | 003은 승인된 통합 계약으로 간주하지 않음 |
++| 제공처 retry | 백엔드에서 담당. MCP는 반환된 429·502·503·504를 자동 재시도하지 않음 | 기존 계획의 상태 오류 MCP retry 유지 문구는 이 합의로 대체. 오류 코드·뜻을 임의 변경하지 않음 |
++| 응답 유실 | MCP–백엔드 응답 유실은 별도이며 같은 멱등 키로 외부 조회 중복 방지 검증 | 성공 재생 및 진행 중 같은 키/본문은 외부 추가 조회 0회. 공유 저장/조정 범위에서 보장 여부 검증 필요 |
++
++### flat Plan 전체 JSON 제안
++
++[flat-plan-proposal.json](flat-plan-proposal.json)은 **합성 계약 검토용 전체 envelope**다. `data.plan` wrapper를 만들지 않고 현재 flat `data`를 유지한다. 실제 장소/좌표/운행편의 증거 또는 실행 완료 예시가 아니다.
++
++| 위치 | 제안·현재 구분 |
++|---|---|
++| data의 기존 plan_id/conversation_id/장소 ID/시각/total_duration/transport_mode/comparison/buffer_applied/notes/막차 필드 | 기존 flat 필드 보존. total_duration 의미만 합의대로 Buffer 포함 변경 |
++| data.recommended_option_id | 추가 제안. 상위 요약이 어느 후보인지 표시하며 사용자 선택과 구분. 승인 대기 |
++| data.comparison.options[]의 기존 PlanSummary 필드 | 기존 위치 유지. 후보의 total_duration도 Buffer 포함 |
++| data.comparison.options[].sources[].basis_at | 의미 합의된 필드. sources의 위치는 추가 승인 대기 |
++| data.comparison.options[].buffer/legs/warnings | 새 후보별 상세 필드 제안. Buffer는 해당 leg_id의 5분 wait를 참조. 위치/구간/경고 schema 승인 대기 |
++| data.comparison.options[].estimated_arrival_at/hard_leave_at | 후보별 추가 시각 제안. appointment의 hard_leave_at은 null. 승인 대기 |
++| data.comparison.selected_option_id | 사용자 선택 전 null. 추천만으로 사용자 선택으로 표시하지 않음 |
++
++상위 fields는 recommended_option_id 후보의 요약이며, 상세는 comparison.options[] 안에만 배치해 동일 Source/Buffer/legs/warnings의 중복을 피한다. 기존 Leg·RouteLeg와 제안의 상세 Leg 구조가 다르므로 전체 schema 합의 및 양쪽 검증을 먼저 한다. 기존 buffer_applied는 전환 중 buffer.total_minutes와 같은 값을 출력하는 호환용 필드로 제안한다.
++
++후보 상한과 flat 배치 결정이 확정되면 spec·plan·tasks의 기존 '후보 3 유지/기존 계약 유지' 문구, MCP 도구 개수, retry 및 중복 실행 검증 기준도 함께 정합화한다. 현재 문서의 이전 문구를 통합본에 자동 적용하지 않는다.
++
++## 10. Source 전달의 로컬 합성 검증 — 2026-09-16
++
++§9의 승인 중 Source/warnings 전달을 구현했다. 이 절은 추가 공동 승인이나 Hermes 실행 기록이 아니다.
++
++- `PlanSummary.sources/warnings`를 약속·막차와 두 종류 재탐색에 보존한다. 기존 제공처 옵션에 출처가 없으면 빈 목록을 반환하며 출처나 기준시각을 만들지 않는다.
++- Source의 미지정 `basis_at`은 출력에서 `null`이다. aware 시각은 +09:00으로 직렬화하고 날짜만 있는 입력·시간대 없는 시각은 거부한다. 신규 Source/경고 모델의 추가 필드는 금지한다.
++- 실시간 Source는 provider·basis_at·retrieved_at·service_date가 일치하는 내부 Evidence가 필요하다. 사용 규칙 확인, normalized/planning_verified, 기준시각 존재 및 조회시각 이전 조건을 모두 만족하지 못하면 해당 후보를 제외한다. 남은 후보가 없으면 기존 경로 없음 오류를 반환한다. 실제 operation별 현재성/ETA 규칙(T015/T040)과 요청 범위 CoverageEvidence(T047)의 대체 검증은 아니다.
++- 기준시각 없는 시간표에는 `SOURCE_BASIS_UNKNOWN` 경고와 전달된 적용 운행일을 표시한다. 원문 개정일/적용 범위를 임의 생성하지 않으며 실제 제공처의 정적 근거 변환은 후속 작업이다. 제공처 입력 객체를 변경하지 않는다.
++- Source 계약 26건, HTTP 확인 후 계획/동일 키 완료 응답 재생의 출처 보존을 검증했다. MCP `test_approved_source_fixture_reaches_mcp_without_loss`는 승인 예시의 null·demo·경고를 포함한 전체 JSON 전달을 확인한다. Plan JSON Schema의 Source 참조·추가 필드 금지·nullable 정의도 검사했다.
++
++**남은 인수**: 실제 공동 MCP 환경의 엄격한 응답 schema 수신·표시, 실제 제공처 변환, 나머지 후보 상세/Buffer 계산 및 사용자 선택 계약. 로컬 adapter 보존 테스트를 Hermes + Solar Pro4 표시 검증으로 보고하지 않는다. T018/T019는 미완료를 유지한다.
++
++## 11. 공유 Schema 수신 검증 승인 및 구현
++
++사용자는 2026-09-16 질의에서 ‘공유 Source Schema와 MCP 수신 검증 구현’을 선택했다. `Docs/api/source-envelope.schema.json`을 추가하고 Source/DataWarning 정의의 백엔드 모델 일치 검사를 연결했다. MCP는 후보별 Source/warnings의 구조·날짜/aware 시각을 검사하고 실패 시 기존 UPSTREAM_RESPONSE_INVALID를 재시도 없이 반환한다. 원문이나 schema 예외는 공개하지 않는다. 전환 입력의 필드 누락/null 허용과 정상 응답 보존은 유지한다. API_SPEC.md와 Docs/api/examples.json에 같은 수신 계약을 기록했다.
++
++정적 Source와 일치하는 Evidence의 기준일·개정·적용 범위는 SOURCE_REFERENCE 경고로 전달한다. 입력에 없는 정보나 기준시각을 만들지 않는다. 상세 정의와 실제 Hermes 연결 결과는 [MCP 수신·배포 검증](../mcp-source-deployment-verification.md)을 따른다.
++
++현재 Hermes에서는 capabilities·장소 검색의 실제 호출을 확인했으며 응답은 demo다. 실제 Source 후보를 표시한 검증은 아직 없으므로 §10의 관련 인수 게이트를 완료 처리하지 않는다. SDK outputSchema는 기존 일반 object이며 공유 상세 Schema 검사는 HTTP 수신 경계에서 실행된다.
++## 팀원 회신에 따른 공동 인수 현황
++
++2026-09-16 team-handoff-reply.md 수령: 현재 MCP의 반환 타입은 일반 dict이며 Source 전용 엄격한 응답 모델은 없다. 기본 envelope 검사 후 내용을 그대로 반환하고 basis_at을 생성·대체하지 않는다는 코드 확인을 받았다. 승인 예시와 최신 Source 변경은 아직 수령하지 않아 누락/null/+09:00 및 후보별 출처/경고의 공동 adapter·stdio·Hermes 표시 검증은 미실행이다. 엄격한 모델을 새로 도입하거나 SDK의 일반 객체 Schema를 Source 인수 통과로 간주하지 않는다. T018/T019의 공동 인수는 미완료다.
++
++후속 변경은 Docs/transit-source-integration의 통합본 이후 delta patch·manifest·승인 예시로 전달하며 팀원이 MCP 수신·보존 및 실제 표시 결과를 회신한다. 백엔드는 provider·정규화·Source/계산과 진행 중 동일 요청의 외부 조회/상태 검증을 맡고, MCP는 응답 유실·같은 key/body/revision 재전송과 사용자 안내를 맡는다. worker/인스턴스 수는 미정이며 완료 응답 재생만으로 진행 중 중복 조회 0회를 보장하지 않는다. 새 공개 오류/도구는 도입하지 않는다.
++
++사용자 제공 API 주소에서 Hermes/Solar Pro4의 실제 get_capabilities 호출과 Demo 표시를 확인했다. 이는 Source 후보·실제 계획 검증이 아니며 세부 실행 증거는 live-verification.md를 따른다. 공개 후보 수 승인(기본 3/상한 5)을 변경하지 않는다.
+diff --git a/specs/004-public-transit-api-integration/contracts/flat-plan-proposal.json b/specs/004-public-transit-api-integration/contracts/flat-plan-proposal.json
+new file mode 100644
+--- /dev/null
++++ b/specs/004-public-transit-api-integration/contracts/flat-plan-proposal.json
+@@ -0,0 +1,116 @@
++{
++  "status": "ok",
++  "data": {
++    "plan_id": "demo_plan_contract_review",
++    "conversation_id": "demo_conversation_contract_review",
++    "origin_place_id": "demo_station_start",
++    "destination_place_id": "demo_station_end",
++    "arrival_deadline": "2026-09-16T19:00:00+09:00",
++    "target_arrival_at": "2026-09-16T18:50:00+09:00",
++    "recommended_leave_at": "2026-09-16T18:05:00+09:00",
++    "total_duration_minutes": 45,
++    "transport_mode": "subway",
++    "recommended_option_id": "demo_option_1",
++    "comparison": {
++      "options": [
++        {
++          "option_id": "demo_option_1",
++          "recommended_leave_at": "2026-09-16T18:05:00+09:00",
++          "target_arrival_at": "2026-09-16T18:50:00+09:00",
++          "total_duration_minutes": 45,
++          "transport_mode": "subway",
++          "reasoning": "합성 계약 예시: 이동·대기 40분과 첫 승차 전 여유 5분을 합쳐 45분. 출발 18:05, 도착 18:50.",
++          "estimated_arrival_at": "2026-09-16T18:50:00+09:00",
++          "hard_leave_at": null,
++          "buffer": {
++            "policy_version": "transit-initial-5m-v1",
++            "total_minutes": 5,
++            "items": [
++              {
++                "code": "initial_boarding_margin",
++                "minutes": 5,
++                "leg_id": "demo_buffer_leg",
++                "reason": "첫 승차 전 5분, 여정당 한 번"
++              }
++            ]
++          },
++          "legs": [
++            {
++              "leg_id": "demo_buffer_leg",
++              "mode": "wait",
++              "from": {
++                "name": "시연 출발역",
++                "latitude": 37.5,
++                "longitude": 127
++              },
++              "to": {
++                "name": "시연 출발역",
++                "latitude": 37.5,
++                "longitude": 127
++              },
++              "departure_at": "2026-09-16T18:05:00+09:00",
++              "arrival_at": "2026-09-16T18:10:00+09:00",
++              "duration_minutes": 5,
++              "transit": null,
++              "wait_reason": "safety_buffer"
++            },
++            {
++              "leg_id": "demo_ride_leg",
++              "mode": "subway",
++              "from": {
++                "name": "시연 출발역",
++                "latitude": 37.5,
++                "longitude": 127
++              },
++              "to": {
++                "name": "시연 도착역",
++                "latitude": 37.6,
++                "longitude": 127.1
++              },
++              "departure_at": "2026-09-16T18:10:00+09:00",
++              "arrival_at": "2026-09-16T18:50:00+09:00",
++              "duration_minutes": 40,
++              "transit": {
++                "line_name": "시연 노선",
++                "direction": "시연 도착역 방면",
++                "headsign": "시연 도착역",
++                "service_id": "DEMO001"
++              },
++              "wait_reason": null
++            }
++          ],
++          "sources": [
++            {
++              "provider": "synthetic-contract-fixture",
++              "basis": "demo",
++              "basis_at": null,
++              "retrieved_at": "2026-09-16T18:00:00+09:00",
++              "service_date": "2026-09-16"
++            }
++          ],
++          "warnings": [
++            {
++              "code": "DEMO_DATA",
++              "message": "역·좌표·노선·운행편·시각은 모두 합성 계약 예시이며 실제 운행 근거가 아닙니다."
++            }
++          ]
++        }
++      ],
++      "selected_option_id": null,
++      "comparison_reason": "권장 후보와 사용자 선택은 구분한다. 선택 전 selected_option_id는 null."
++    },
++    "buffer_applied": 5,
++    "notes": "배치 승인된 합성 계약 예시. 실제 조회·계산 성공 또는 구현 완료의 증거가 아니다.",
++    "is_last_journey": false,
++    "operating_date": null,
++    "arrival_date": null,
++    "last_journey_supported": false
++  },
++  "error": null,
++  "meta": {
++    "request_id": "00000000-0000-4000-8000-000000000001",
++    "server_time": "2026-09-16T18:00:00+09:00",
++    "api_version": "v1",
++    "is_demo": true
++  }
++}

@@ -1,0 +1,690 @@
+diff --git a/backend/app/domain/transit.py b/backend/app/domain/transit.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/domain/transit.py
+@@ -0,0 +1,275 @@
++"""제공처 원문을 추정으로 보완하지 않는 교통 조회·계산 근거 모델."""
++
++from datetime import date, datetime
++from typing import Literal
++from zoneinfo import ZoneInfo
++
++from pydantic import (
++    BaseModel,
++    ConfigDict,
++    Field,
++    StrictStr,
++    field_validator,
++    model_validator,
++)
++
++SEOUL = ZoneInfo("Asia/Seoul")
++
++
++class TransitModel(BaseModel):
++    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
++
++
++def seoul_time(value: datetime | None) -> datetime | None:
++    if value is None:
++        return None
++    if value.tzinfo is None or value.utcoffset() is None:
++        raise ValueError("시각에는 시간대가 필요합니다.")
++    return value.astimezone(SEOUL)
++
++
++class Evidence(TransitModel):
++    provider: StrictStr = Field(min_length=1)
++    service: StrictStr = Field(min_length=1)
++    operation: StrictStr = Field(min_length=1)
++    basis: Literal["static", "schedule", "realtime", "demo"]
++    basis_at: datetime | None = None
++    retrieved_at: datetime
++    reference_date: date | None = None
++    revision: StrictStr | None = None
++    valid_from: date | None = None
++    valid_until: date | None = None
++    service_date: date | None = None
++    day_type: StrictStr | None = None
++    usage_rules_verified: bool = False
++    verification_state: Literal[
++        "documented",
++        "configured",
++        "real_call_verified",
++        "normalized",
++        "planning_verified",
++    ] = "documented"
++
++    _aware = field_validator("basis_at", "retrieved_at")(seoul_time)
++
++    @model_validator(mode="after")
++    def check_validity(self):
++        if self.valid_from and self.valid_until and self.valid_from > self.valid_until:
++            raise ValueError("적용 기간이 역전됐습니다.")
++        return self
++
++    @property
++    def realtime_usable(self) -> bool:
++        return (
++            self.basis == "realtime"
++            and self.basis_at is not None
++            and self.basis_at <= self.retrieved_at
++            and self.usage_rules_verified
++            and self.verification_state in ("normalized", "planning_verified")
++        )
++
++
++class ProviderIdentifier(TransitModel):
++    namespace: StrictStr = Field(min_length=1)
++    value: StrictStr = Field(min_length=1)
++
++
++class Coordinate(TransitModel):
++    system: Literal["WGS84", "GRS80"]
++    x: float = Field(allow_inf_nan=False)
++    y: float = Field(allow_inf_nan=False)
++
++    @model_validator(mode="after")
++    def check_wgs84_range(self):
++        if self.system == "WGS84" and not (
++            -180 <= self.x <= 180 and -90 <= self.y <= 90
++        ):
++            raise ValueError("WGS84 좌표 범위를 벗어났습니다.")
++        return self
++
++    def wgs84(self) -> tuple[float, float]:
++        if self.system != "WGS84":
++            raise ValueError("공개 좌표는 검증된 WGS84만 사용할 수 있습니다.")
++        return self.y, self.x
++
++
++class TransitPlace(TransitModel):
++    place_id: StrictStr = Field(min_length=1)
++    mode: Literal["subway", "bus"]
++    name: StrictStr = Field(min_length=1)
++    line: StrictStr | None = None
++    provider_ids: list[ProviderIdentifier] = Field(min_length=1)
++    coordinate: Coordinate | None = None
++    evidence: Evidence
++
++
++class StopOccurrence(TransitModel):
++    place_id: StrictStr = Field(min_length=1)
++    sequence: int = Field(ge=1, strict=True)
++    section_id: ProviderIdentifier | None = None
++    direction: StrictStr | None = None
++
++
++class RoutePattern(TransitModel):
++    route_id: ProviderIdentifier
++    mode: Literal["subway", "bus"]
++    direction: StrictStr = Field(min_length=1)
++    name: StrictStr | None = None
++    headsign: StrictStr | None = None
++    occurrences: list[StopOccurrence] = Field(min_length=1)
++    evidence: Evidence
++
++    @model_validator(mode="after")
++    def check_sequences(self):
++        sequences = [stop.sequence for stop in self.occurrences]
++        if sequences != sorted(set(sequences)):
++            raise ValueError("정류소 occurrence 순서는 중복 없이 증가해야 합니다.")
++        return self
++
++
++class ScheduledCall(TransitModel):
++    occurrence: StopOccurrence
++    service_id: ProviderIdentifier
++    direction: StrictStr = Field(min_length=1)
++    headsign: StrictStr = Field(min_length=1)
++    service_date: date
++    arrival_at: datetime | None = None
++    departure_at: datetime
++    raw_arrival_time: StrictStr | None = None
++    raw_departure_time: StrictStr | None = None
++    evidence: Evidence
++
++    _aware = field_validator("arrival_at", "departure_at")(seoul_time)
++
++    @model_validator(mode="after")
++    def check_times(self):
++        if self.arrival_at and self.arrival_at > self.departure_at:
++            raise ValueError("정차 도착·출발 시각이 역전됐습니다.")
++        return self
++
++
++class TransitObservation(TransitModel):
++    kind: Literal["position", "arrival_prediction", "status"]
++    occurrence: StopOccurrence
++    service_id: ProviderIdentifier | None = None
++    raw_eta: StrictStr | None = None
++    eta_unit: Literal["seconds", "minutes"] | None = None
++    predicted_arrival_at: datetime | None = None
++    evidence: Evidence
++
++    _aware = field_validator("predicted_arrival_at")(seoul_time)
++
++    @model_validator(mode="after")
++    def check_prediction_type(self):
++        if self.kind != "arrival_prediction" and self.predicted_arrival_at is not None:
++            raise ValueError("위치·상태 관측에서 도착예측을 생성할 수 없습니다.")
++        return self
++
++    @property
++    def usable_for_current_operation(self) -> bool:
++        return (
++            self.kind == "arrival_prediction"
++            and self.evidence.realtime_usable
++            and self.predicted_arrival_at is not None
++            and self.predicted_arrival_at >= self.evidence.retrieved_at
++        )
++
++
++class TransferLink(TransitModel):
++    origin_place_id: StrictStr = Field(min_length=1)
++    destination_place_id: StrictStr = Field(min_length=1)
++    connection_id: StrictStr = Field(min_length=1)
++    minimum_minutes: float = Field(ge=0, allow_inf_nan=False)
++    evidence: Evidence
++
++
++class JourneyLeg(TransitModel):
++    leg_id: StrictStr = Field(min_length=1)
++    mode: Literal["subway", "bus", "walk", "wait"]
++    origin_place_id: StrictStr = Field(min_length=1)
++    destination_place_id: StrictStr = Field(min_length=1)
++    departure_at: datetime
++    arrival_at: datetime
++    wait_reason: Literal["scheduled_wait", "safety_buffer"] | None = None
++    evidence: Evidence
++
++    _aware = field_validator("departure_at", "arrival_at")(seoul_time)
++
++    @model_validator(mode="after")
++    def check_times(self):
++        if self.arrival_at < self.departure_at:
++            raise ValueError("구간 시각이 역전됐습니다.")
++        if (self.mode == "wait") != (self.wait_reason is not None):
++            raise ValueError("대기 구간에는 대기 이유가 필요합니다.")
++        if self.mode == "wait" and self.origin_place_id != self.destination_place_id:
++            raise ValueError("대기 중에는 장소를 변경할 수 없습니다.")
++        return self
++
++    @property
++    def duration_minutes(self) -> float:
++        return (self.arrival_at - self.departure_at).total_seconds() / 60
++
++
++class JourneyCandidate(TransitModel):
++    option_id: StrictStr = Field(min_length=1)
++    legs: list[JourneyLeg] = Field(min_length=2)
++
++    @model_validator(mode="after")
++    def check_connections_and_buffer(self):
++        if len({leg.leg_id for leg in self.legs}) != len(self.legs):
++            raise ValueError("구간 ID는 후보 안에서 고유해야 합니다.")
++        for previous, current in zip(self.legs, self.legs[1:], strict=False):
++            if (
++                previous.arrival_at != current.departure_at
++                or previous.destination_place_id != current.origin_place_id
++            ):
++                raise ValueError("구간의 시각과 장소가 연속해야 합니다.")
++        margins = [leg for leg in self.legs if leg.wait_reason == "safety_buffer"]
++        if len(margins) != 1 or margins[0].duration_minutes != 5:
++            raise ValueError("첫 승차 전 5분 여유를 한 번 배정해야 합니다.")
++        first_ride = next(
++            (i for i, leg in enumerate(self.legs) if leg.mode in ("subway", "bus")),
++            None,
++        )
++        if first_ride is None or self.legs.index(margins[0]) >= first_ride:
++            raise ValueError("승차 전 여유는 첫 승차보다 앞에 있어야 합니다.")
++        return self
++
++    @property
++    def recommended_leave_at(self) -> datetime:
++        return self.legs[0].departure_at
++
++    @property
++    def estimated_arrival_at(self) -> datetime:
++        return self.legs[-1].arrival_at
++
++    @property
++    def total_duration_minutes(self) -> float:
++        return sum(leg.duration_minutes for leg in self.legs)
++
++    @property
++    def is_demo(self) -> bool:
++        return any(leg.evidence.basis == "demo" for leg in self.legs)
++
++
++class CoverageEvidence(TransitModel):
++    service: StrictStr = Field(min_length=1)
++    operation: StrictStr = Field(min_length=1)
++    state: Literal[
++        "documented",
++        "configured",
++        "real_call_verified",
++        "normalized",
++        "planning_verified",
++    ]
++    scope: list[StrictStr] = Field(default_factory=list)
++    limitations: list[StrictStr] = Field(default_factory=list)
++    evidence: Evidence | None = None
++
++    @model_validator(mode="after")
++    def check_planning_evidence(self):
++        if self.state == "planning_verified" and (
++            not self.scope or self.evidence is None or self.evidence.basis == "demo"
++        ):
++            raise ValueError("실제 계획 지원에는 검증한 범위와 실제 근거가 필요합니다.")
++        return self
+diff --git a/backend/app/integrations/verify_transit.py b/backend/app/integrations/verify_transit.py
+new file mode 100644
+--- /dev/null
++++ b/backend/app/integrations/verify_transit.py
+@@ -0,0 +1,405 @@
++"""고정된 공식 endpoint만 조회하는 운영자 최소 검증. --live가 필수다."""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import json
++from dataclasses import dataclass
++from datetime import datetime
++from pathlib import Path
++from typing import TYPE_CHECKING
++from urllib.parse import quote
++from zoneinfo import ZoneInfo
++
++import httpx
++
++from app.services.provider_client import (
++    ProviderClient,
++    ProviderClientError,
++    RequestBudget,
++)
++
++if TYPE_CHECKING:
++    from app.config import Settings
++
++
++@dataclass(frozen=True)
++class ProbeSpec:
++    operation: str
++    key_field: str
++    family: str
++    base_url: str
++    fields: tuple[str, ...]
++
++
++STATIC = "http://openapi.seoul.go.kr:8088"
++REALTIME = "http://swopenapi.seoul.go.kr"
++BUS = "http://ws.bus.go.kr"
++CATALOG = {
++    "subway-stations": ProbeSpec(
++        "SearchSTNBySubwayLineInfo",
++        "seoul_subway_stations_api_key",
++        "static",
++        STATIC,
++        ("STATION_CD", "FR_CODE", "STATION_NM", "LINE_NUM"),
++    ),
++    "subway-arrivals": ProbeSpec(
++        "realtimeStationArrival",
++        "seoul_subway_arrival_api_key",
++        "realtime",
++        REALTIME,
++        ("subwayId", "statnId", "updnLine", "recptnDt", "barvlDt"),
++    ),
++    "subway-positions": ProbeSpec(
++        "realtimePosition",
++        "seoul_subway_position_api_key",
++        "realtime",
++        REALTIME,
++        ("subwayId", "statnId", "trainNo", "recptnDt", "updnLine"),
++    ),
++    "subway-timetable": ProbeSpec(
++        "SearchSTNTimeTableByIDService",
++        "seoul_subway_timetable_api_key",
++        "static",
++        STATIC,
++        (
++            "STATION_CD",
++            "FR_CODE",
++            "TRAIN_NO",
++            "ARRIVETIME",
++            "LEFTTIME",
++            "WEEK_TAG",
++            "INOUT_TAG",
++        ),
++    ),
++    "subway-last-train": ProbeSpec(
++        "SearchSTNTimeTableByFRCodeService",
++        "seoul_subway_last_train_api_key",
++        "static",
++        STATIC,
++        ("STATION_CD", "FR_CODE", "TRAIN_NO", "ARRIVETIME", "LEFTTIME", "FL_FLAG"),
++    ),
++    "subway-path": ProbeSpec(
++        "getShtrmPath",
++        "seoul_subway_path_api_key",
++        "path",
++        STATIC,
++        ("reqHr", "wtngHr", "trainDptreTm", "trainArvlTm", "trainno", "tmnlStnCd"),
++    ),
++    "bus-stations": ProbeSpec(
++        "getStationByName",
++        "seoul_bus_stations_api_key",
++        "bus",
++        BUS,
++        ("stId", "arsId", "posX", "posY"),
++    ),
++    "bus-routes": ProbeSpec(
++        "getStaionByRoute",
++        "seoul_bus_routes_api_key",
++        "bus",
++        BUS,
++        ("busRouteId", "station", "seq", "section", "gpsX", "gpsY"),
++    ),
++    "bus-positions": ProbeSpec(
++        "getBusPosByRouteSt",
++        "seoul_bus_positions_api_key",
++        "bus",
++        BUS,
++        ("busRouteId", "sectOrd", "vehId", "dataTm"),
++    ),
++    "bus-arrivals": ProbeSpec(
++        "getArrInfoByRouteAll",
++        "seoul_bus_arrivals_api_key",
++        "bus",
++        BUS,
++        ("stId", "staOrd", "mkTm", "isLast1", "isLast2", "arrmsg1"),
++    ),
++}
++
++
++def invalid_response():
++    raise ProviderClientError(error_code="UPSTREAM_RESPONSE_INVALID")
++
++
++def response_diagnostics(data: dict, spec: ProbeSpec) -> dict:
++    """구조와 고정 코드만 분류하고 임의 제공처 텍스트는 반환하지 않는다."""
++    if "RESULT" in data:
++        shape, frame = "business_result", data.get("RESULT")
++    elif spec.operation in data:
++        shape, frame = "operation", data.get(spec.operation)
++        if isinstance(frame, dict):
++            frame = frame.get("RESULT") or frame.get("errorMessage")
++    elif "ServiceResult" in data:
++        shape, frame = "bus", data.get("ServiceResult")
++        frame = frame.get("msgHeader") if isinstance(frame, dict) else None
++    elif "document" in data:
++        shape, frame = "path", data.get("document")
++        frame = frame.get("header") if isinstance(frame, dict) else None
++    else:
++        shape, frame = "unknown", None
++    known = {
++        "INFO-000",
++        "INFO-100",
++        "INFO-200",
++        "ERROR-300",
++        "ERROR-301",
++        "ERROR-310",
++        "ERROR-331",
++        "ERROR-332",
++        "ERROR-333",
++        "ERROR-334",
++        "ERROR-335",
++        "ERROR-336",
++        "ERROR-500",
++        "ERROR-600",
++        "ERROR-601",
++        "0",
++        "00",
++    }
++    code = None
++    if isinstance(frame, dict):
++        code = (
++            frame.get("CODE")
++            or frame.get("code")
++            or frame.get("headerCd")
++            or frame.get("resultCode")
++        )
++    return {
++        "response_shape": shape,
++        "business_code": code if isinstance(code, str) and code in known else "unknown",
++    }
++
++
++def row_list(value) -> list[dict]:
++    if value in (None, ""):
++        return []
++    rows = value if isinstance(value, list) else [value]
++    if not all(isinstance(row, dict) for row in rows):
++        invalid_response()
++    return rows
++
++
++def inspect_response(data: dict, spec: ProbeSpec) -> tuple[list[dict], str]:
++    """문서에 명시된 업무 상태만 판정한다. 미지의 원문은 출력하지 않는다."""
++    top_result = data.get("RESULT")
++    frame = data.get(spec.operation)
++    if spec.family == "realtime" and isinstance(frame, dict):
++        header = frame.get("errorMessage")
++        if isinstance(header, dict):
++            code = header.get("code")
++            if code == "INFO-100":
++                raise ProviderClientError(status_code=403)
++            if code == "INFO-200":
++                return [], "INFO-200"
++            if code != "INFO-000" or str(header.get("status")) != "200":
++                invalid_response()
++            tag = (
++                "realtimeArrivalList"
++                if spec.operation == "realtimeStationArrival"
++                else "realtimePositionList"
++            )
++            if tag not in frame:
++                invalid_response()
++            return row_list(frame[tag]), "INFO-000"
++    result = top_result or (frame.get("RESULT") if isinstance(frame, dict) else None)
++    if isinstance(result, dict):
++        code = result.get("CODE") or result.get("code")
++        if code == "INFO-100":
++            raise ProviderClientError(status_code=403)
++        if code == "INFO-200":
++            return [], "INFO-200"
++        if code != "INFO-000":
++            invalid_response()
++        if not isinstance(frame, dict):
++            invalid_response()
++        rows = row_list(frame.get("row"))
++        if not rows and str(frame.get("list_total_count", "")) != "0":
++            invalid_response()
++        return rows, "INFO-000"
++    if spec.family == "bus":
++        frame = data.get("ServiceResult")
++        gateway = data.get("OpenAPI_ServiceResponse")
++        if isinstance(gateway, dict):
++            header = gateway.get("cmmMsgHeader", {})
++            code = header.get("returnReasonCode") if isinstance(header, dict) else None
++            if code in ("20", "30", "31"):
++                raise ProviderClientError(status_code=403)
++            if code in ("22", "23"):
++                raise ProviderClientError(status_code=429, error_code="RATE_LIMITED")
++            invalid_response()
++        if not isinstance(frame, dict) or not isinstance(frame.get("msgHeader"), dict):
++            invalid_response()
++        if frame["msgHeader"].get("headerCd") != "0":
++            invalid_response()
++        body = frame.get("msgBody")
++        if body in (None, ""):
++            return [], "0"
++        if not isinstance(body, dict):
++            invalid_response()
++        return row_list(body.get("itemList")), "0"
++    if spec.family == "path":
++        frame = data.get("document")
++        if not isinstance(frame, dict) or not isinstance(frame.get("header"), dict):
++            invalid_response()
++        if frame["header"].get("resultCode") != "00":
++            invalid_response()
++        body = frame.get("body")
++        if not isinstance(body, dict) or not isinstance(body.get("paths"), dict):
++            invalid_response()
++        return row_list(body["paths"].get("path")), "00"
++    invalid_response()
++
++
++def build_request(spec: ProbeSpec, key: str) -> tuple[str, dict | None]:
++    """인증 probe는 공식 예제 입력을 사용하며 실제 계획으로 해석하지 않는다."""
++    if spec.family == "bus":
++        category = {
++            "getStationByName": "stationinfo",
++            "getStaionByRoute": "busRouteInfo",
++            "getBusPosByRouteSt": "buspos",
++            "getArrInfoByRouteAll": "arrive",
++        }[spec.operation]
++        params = {"serviceKey": key}
++        if spec.operation == "getStationByName":
++            params["stSrch"] = "서울역"
++        else:
++            params["busRouteId"] = "100100118"
++        if spec.operation == "getBusPosByRouteSt":
++            params.update(startOrd="1", endOrd="10")
++        return f"/api/rest/{category}/{spec.operation}", params
++    segments = [key, "xml", spec.operation]
++    if spec.family == "realtime":
++        segments += [
++            "0",
++            "1",
++            "서울" if spec.operation == "realtimeStationArrival" else "1호선",
++        ]
++    else:
++        segments += ["1", "1"]
++        if spec.operation == "SearchSTNTimeTableByIDService":
++            segments += ["0309", "1", "1"]
++        elif spec.operation == "SearchSTNTimeTableByFRCodeService":
++            segments += ["132", "1", "1"]
++        elif spec.family == "path":
++            segments += ["답십리", "역삼", "2025-10-17 10:00:00"]
++    prefix = "/api/subway" if spec.family == "realtime" else ""
++    return (
++        prefix + "/" + "/".join(quote(segment, safe="") for segment in segments),
++        None,
++    )
++
++
++def report_for(alias: str | None, state: str, **safe_values) -> dict:
++    spec = CATALOG.get(alias)
++    return {
++        "service_alias": alias if spec else None,
++        "operation": spec.operation if spec else None,
++        "state": state,
++        "verified_for_planning": False,
++        **safe_values,
++    }
++
++
++async def verify_service(
++    alias: str, settings: Settings, *, http_client: httpx.AsyncClient | None = None
++) -> dict:
++    spec = CATALOG.get(alias)
++    if spec is None:
++        return report_for(None, "invalid_input")
++    key = getattr(settings, spec.key_field).get_secret_value()
++    if not key:
++        return report_for(alias, "missing_key", attempts=0)
++    path, params = build_request(spec, key)
++    client = ProviderClient(base_url=spec.base_url, http_client=http_client)
++    budget = RequestBudget.for_operation("verify")
++    diagnostics = {}
++
++    def validate(data):
++        diagnostics.update(response_diagnostics(data, spec))
++        return inspect_response(data, spec)
++
++    try:
++        data = await client.call(
++            "GET",
++            path,
++            params=params,
++            response_format="xml",
++            validate_response=validate,
++            budget=budget,
++            service_alias=alias,
++            operation=spec.operation,
++            retryable=True,
++        )
++        rows, business_code = inspect_response(data, spec)
++        return report_for(
++            alias,
++            "real_call_verified" if rows else "empty",
++            row_count=len(rows),
++            business_code=business_code,
++            fields_present=[
++                field for field in spec.fields if any(field in row for row in rows)
++            ],
++            attempts=budget.attempts,
++            retrieved_at=datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
++            basis_at=None,
++        )
++    except ProviderClientError as error:
++        state = (
++            "authentication_failed"
++            if error.status_code in (401, 403)
++            else {
++                "RATE_LIMITED": "rate_limited",
++                "UPSTREAM_TIMEOUT": "timeout",
++                "UPSTREAM_RESPONSE_INVALID": "unverified_response",
++            }.get(error.error_code, "provider_failure")
++        )
++        return report_for(
++            alias,
++            state,
++            http_status=error.status_code,
++            error_code=error.error_code,
++            attempts=budget.attempts,
++            **diagnostics,
++        )
++    except Exception:
++        return report_for(alias, "unverified_response", attempts=budget.attempts)
++    finally:
++        await client.aclose()
++
++
++class SafeParser(argparse.ArgumentParser):
++    def error(self, message):
++        raise ValueError("운영자 입력을 확인해 주세요.")
++
++
++def cli_main(argv=None, *, settings_loader=None) -> int:
++    parser = SafeParser(
++        description="공식 서비스 최소 검증. 키·원문 응답을 출력하지 않습니다."
++    )
++    parser.add_argument("--service", required=True, choices=tuple(CATALOG))
++    parser.add_argument("--live", action="store_true")
++    parser.add_argument("--env-file", type=Path)
++    try:
++        args = parser.parse_args(argv)
++        if not args.live:
++            result = report_for(args.service, "requires_live")
++        elif args.env_file is not None and not args.env_file.is_absolute():
++            result = report_for(args.service, "invalid_input")
++        else:
++            loader = settings_loader
++            if loader is None:
++                from app.config import Settings
++
++                loader = Settings.from_transit_file
++            settings = loader(args.env_file, env_file=None)
++            result = asyncio.run(verify_service(args.service, settings))
++        print(json.dumps(result, ensure_ascii=False))
++        return 0 if result["state"] in ("real_call_verified", "empty") else 2
++    except Exception:
++        print(json.dumps(report_for(None, "invalid_input"), ensure_ascii=False))
++        return 2
++
++
++if __name__ == "__main__":
++    raise SystemExit(cli_main())

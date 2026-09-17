@@ -1,5 +1,136 @@
 # 지금 — MCP 서비스용 백엔드 계산 API 명세 v0.1
 
+## 004 공공데이터 연동 공동 승인 계약 — 2026-09-16
+
+이 절은 사용자 전달 공동 합의와 후속 배치 승인을 기록한다. 아래 confirm 구현 계약의 경로·확인·revision·멱등성은 보존한다. Source와 후보별 상세·Buffer 계산은 승인된 변경 목표이며 해당 구현·계약 테스트가 끝나기 전에는 구현 완료로 해석하지 않는다. 초기 설계의 data.plan 및 최대 후보 3 제안은 적용하지 않는다.
+
+- 후보 기본 3개, 요청 범위 1~5개. HTTP MCP는 confirm_trip 포함 6개 도구다. confirm과 journeys/plan/last_journey 경로를 보존한다.
+- envelope의 data는 flat Plan이다. data.recommended_option_id는 상위 요약의 추천 후보 ID이며 사용자 선택과 구분한다. data.comparison.selected_option_id는 사용자 선택 전 null이다.
+- Source·Buffer·legs·warnings와 estimated_arrival_at·hard_leave_at은 data.comparison.options[] 후보마다 배치한다. 상위 요약은 추천 후보와 일치해야 한다. 전체 합성 예시는 Docs/api/examples.json의 transit_flat_plan_004다.
+- Source.basis_at은 전환 입력 optional, 신규 출력에는 null 포함 항상 제공한다. 유효한 시각은 ISO 8601 +09:00이다. null/누락은 제공처 기준시각 미확인으로 처리하며 retrieved_at으로 대체하지 않는다. 날짜만 있는 자료에 임의 시각을 만들지 않는다. 기준시각 미검증 실시간은 현재 운행 계산에서 제외한다. 정적 기준일·적용일은 정확한 경고로 전달한다.
+- Buffer.policy_version=transit-initial-5m-v1, item.code=initial_boarding_margin이다. 첫 승차 전 safety_buffer wait 5분을 여정당 한 번 포함한다. item.leg_id는 해당 wait를 참조한다. total_duration_minutes는 이 5분을 포함한 구간 합이다. 기존 추가 5분 차감은 제거하며 buffer_applied는 추천 후보 buffer.total_minutes와 같다. 이동·대기 40분 + Buffer 5분은 총 45분, 목표 18:50이면 출발 18:05다.
+- 제공처 retry는 백엔드가 담당한다. MCP는 반환된 429·502·503·504를 자동 재시도하지 않는다. 응답 유실 재시도는 같은 멱등 키·본문·revision을 사용하며 진행 중/완료 재생의 외부 추가 조회 0회를 검증한다. 조정의 프로세스/인스턴스 보장 범위도 기록한다.
+
+최종 합의 이력은 specs/004-public-transit-api-integration/contracts/transit-integration.md §9를 따른다. 실제 제공처 호출·계산·Hermes 표시 검증은 합성 JSON 및 승인만으로 완료 처리하지 않는다.
+
+### Source·warnings 공유 수신 검증 — 2026-09-16
+
+사용자는 공유 Source Schema와 MCP 수신 검증 구현을 승인했다. `Docs/api/source-envelope.schema.json`의 Source/DataWarning 정의는 백엔드 모델과 계약 테스트로 일치시킨다. MCP는 flat Plan과 재탐색의 `comparison.new_plan` 안의 후보별 출처·경고를 검사한다. 기존 후보의 sources/warnings 누락과 Source.basis_at 누락/null은 전환 입력으로 허용하며 값을 보충하지 않는다. 필드가 있으면 타입·필수 출처 필드·추가 필드 금지·날짜/aware datetime 형식을 검사한다.
+
+검증 실패는 기존 `UPSTREAM_RESPONSE_INVALID`를 반환하며 응답 원문·검증 예외 내용을 노출하거나 자동 재시도하지 않는다. 새 오류 코드나 003의 미승인 diagnostics 계약을 추가하지 않는다. SDK가 광고하는 outputSchema는 기존 일반 object를 유지하며 상세 검증은 MCP의 HTTP 수신 경계에서 수행한다.
+
+정적 출처와 일치하는 내부 Evidence의 기준일·개정·적용 시작/종료일은 후보의 `SOURCE_REFERENCE` 경고로 전달한다. 확인된 항목만 표시하며 자료 적용 적합성·실시간 현재성을 검증한 것으로 승격하지 않는다.
+
+## 2026-09-16 확인 상태 구현 계약
+
+이 절은 `feature/backend-confirm-completion`에서 실제 구현·HTTP 검증한 계약이다.
+아래 초기 설계 문단과 충돌하는 확인·상태·요청 형식은 이 절을 우선한다.
+기존 계산 서비스의 Plan/Comparison 응답 형태는 유지했다. 아래 초기 설계의
+중첩 Plan·PlaceSlot 형태를 구현 완료로 해석하지 않는다. 최신 실행 예제는
+`Docs/api/examples.json`이며 모두 Mock provider의 demo 응답이다.
+
+### 실제 등록 API: 8개
+
+| Method | 전체 경로 | 역할 |
+|---|---|---|
+| GET | `/api/v1/health` | 연결 확인 |
+| GET | `/api/v1/capabilities` | Mock 지원 범위·기본값 |
+| GET | `/api/v1/places` | Mock 장소 검색 |
+| POST | `/api/v1/mobility/interpret` | 초안 저장·갱신 |
+| POST | `/api/v1/conversations/{conversation_id}/confirm` | 저장 초안에 대한 사용자 확인 |
+| POST | `/api/v1/journeys/plan` | kind별 계산 |
+| POST | `/api/v1/journeys/plan/last_journey` | 기존 막차 전용 경로, kind=last_journey 필수 |
+| POST | `/api/v1/journeys/replan` | 확인된 현재 조건으로 재탐색 |
+
+`/docs`, `/redoc`, `/openapi.json`은 위 업무 API 개수에 포함하지 않는다.
+서버 선택 API는 없다. 실제 선택된 plan_id와 option_id는 Hermes/MCP 대화가 관리한다.
+
+### 계산 조건과 정규화
+
+`confirmed_data`는 다음 7개 조건만 받는다. 장소 ID는 Mock 장소 목록에서 해석 가능해야 한다.
+
+| 필드 | appointment | last_journey |
+|---|---|---|
+| kind | appointment | last_journey |
+| origin_place_id | 필수, 공백 불가 | 동일 |
+| destination_place_id | 필수, 공백 불가 | 동일 |
+| arrival_deadline | 오프셋 포함 datetime 필수 | null |
+| arrival_preference_minutes | 0~120 정수, 생략/null은 기본 0 | 0, 생략/null도 0으로 정규화 |
+| service_date | null | YYYY-MM-DD 필수 |
+| transport_modes | subway/bus 배열, 생략/null은 두 수단 | 동일 |
+
+교통수단 배열의 순서·중복은 비교 전에 제거한다. 빈 배열은 허용하지 않는다.
+도보는 연결 구간으로 허용하며 선택 교통수단 enum은 아니다. 택시는 지원하지 않는다.
+datetime은 UTC로 변환하여 같은 순간인지 비교한다. 조건 정규화와 멱등성 payload
+hash는 별개다. 멱등성은 전체 원본 JSON의 배열 순서·null/생략 차이를 보존한다.
+
+### interpret → confirm → plan
+
+1. interpret 본문: `natural_language`(필수), `context`(위 조건의 명시적 보완값 및
+   `ambiguities` 문자열 배열), `conversation_id`/`expected_revision`(후속 요청).
+   최초 요청은 conversation_id를 생략한다. 존재하지 않는 ID를 임의로 만들면 404다.
+2. interpret는 DB에 `interpret_draft`, 미해결 필드, revision을 저장한다.
+   응답 data는 `trip_draft`, `ready_for_plan`, `missing_fields`,
+   `confirmation_questions`, `requires_confirmation`, `next_action`이다.
+   `ready_for_plan=true`도 동의가 아니다. 확인 절차를 안내하는 status는
+   `needs_confirmation`, `requires_confirmation=true`, `next_action=confirm`이다.
+3. 사용자 동의 후 confirm 본문으로 `expected_revision`과 `confirmed_data`를 보낸다.
+   서버 저장 초안과 정규화된 조건이 같고 미해결 항목이 없어야 한다.
+   confirm의 임의 값으로 초안을 덮어쓰지 않는다. 성공 시 `confirmed_conditions`,
+   `conditions_confirmed=true`, `places_confirmed=true`를 저장하고 revision을 증가시킨다.
+4. plan은 기존 평면 본문 형식을 유지한다: `conversation_id`, `expected_revision`,
+   위 7개 조건, 선택 `max_options`(기본 3, 1~5).
+   이전 단일 `transport_mode`는 subway/bus만 대응하며 복수 필드와 충돌하면 거절한다.
+   `user_confirmed`나 `X-User-Confirmed`만으로 저장된 확인을 대체할 수 없다.
+5. plan은 확인 조건·두 플래그와 요청 조건의 일치를 모두 검사한다.
+   확인 누락/불일치는 422 USER_CONFIRMATION_REQUIRED, revision 불일치는
+   409 CONVERSATION_VERSION_CONFLICT다. 필수 스키마 오류는 422 VALIDATION_ERROR다.
+6. 후속 interpret에서 실질 조건이 바뀌거나 미해결 항목이 생기면 확인을 무효화한다.
+   같은 정규화 조건이고 새 미해결 항목이 없으면 기존 확인을 유지한다.
+
+meta는 `conversation_id`, `revision`, `expires_at`, `request_id`, `server_time`,
+`api_version`, `is_demo=true`를 포함한다. 실패 응답에는 대화 상태 meta가 없을 수 있다.
+
+### replan
+
+본문: `conversation_id`, `expected_revision`, `trip`(위 조건),
+`current_origin_place_id`, `reason`(missed_connection/route_changed/manual),
+`user_confirmed=true`, `previous_plan`, 선택 `max_options`.
+
+`previous_plan`은 실제 선택한 `plan_id`, `selected_option_id`,
+`recommended_leave_at`, `estimated_arrival_at` 네 필드이며 시각에는 오프셋이 필요하다.
+서버가 이 선택을 소유하거나 과거 plan_id를 조회하여 진위를 보증하지 않는다.
+현재 출발지로 바뀐 조건 전체가 저장 확인과 일치해야 한다. 변경 시 먼저 interpret와
+confirm을 다시 수행한다. 기존 Deadline을 현재 시각 기준으로 임의 연장하지 않는다.
+비교는 이전 선택의 estimated_arrival_at을 사용하며 소수 분 차이를 보존한다.
+응답은 기존 `replan_id`, `conversation_id`, `reason`, `comparison`, `notes` 구조이며
+comparison에 `new_plan`, `previous_plan_id`, `previous_selected_option_id`,
+`arrival_change_minutes`, `leave_change_minutes`, `previous_plan_preserved`,
+`previous_plan_valid`가 있다. 새 후보 저장은 선택 적용이 아니며 active_selected_plan을 변경하지 않는다.
+
+### DB·멱등성과 오류
+
+- 모든 POST에 UUIDv4 표준 36자 Idempotency-Key가 필수다. 성공 응답을 DB에 저장하며
+  동일 key·동일 요청은 계산·revision 증가·TTL 갱신 없이 원본 응답을 그대로 재생한다.
+- 범위는 conversation_id + key다. 같은 대화에서 다른 연산/path로 재사용해도 409
+  IDEMPOTENCY_KEY_REUSED다. 최초 interpret는 key로 안정적인 신규 대화 ID를 연결해 중복 생성을 막는다.
+- 만료 검사는 재생보다 먼저, 재생은 stale revision 검사보다 먼저 한다.
+- provider 호출 전 읽기 트랜잭션을 종료한다. 결과 후 유효성·key·revision을 다시 확인하고
+  SQL revision 조건부 UPDATE + 상태 변경 + 멱등성 기록을 한 트랜잭션으로 커밋한다.
+- provider 장애는 상태·revision·updated_at·TTL을 바꾸지 않는다. 가상 경로 fallback을 하지 않는다.
+- LAST_JOURNEY_UNSUPPORTED / NO_FEASIBLE_JOURNEY는 HTTP 200, status=unavailable,
+  data=null이다. 이 업무 결과도 재생되며 기존 후보·선택을 지우지 않는다.
+- 신규 DB는 시작 시 생성한다. 기존 로컬 DB에는 확인용 컬럼만 추가하며 기존 행을 자동 확인하지 않는다.
+  대화 TTL은 24시간, tombstone 보존은 24시간이다. 시작 시·60초마다·요청 시 만료를 검사한다.
+- 이 구현은 Mock 전용이다. 실제 막차 검증·교통 조회·서비스 Agent 실행이나 배포 완료를 뜻하지 않는다.
+
+---
+
+## 초기 제품·계산 설계 참고
+
+이하 내용은 기존 상세 설계와 목표 응답 설명을 보존한 자료다.
+현재 실행 요청·확인 흐름·라우트 목록은 위 구현 계약과 최신 examples.json을 따른다.
+
 - 작성일: 2026-09-12 / 제품 방향 설명 갱신: 2026-09-14
 - 상태: **구현을 위한 계약 초안**. 실행·배포 완료를 의미하지 않는다.
 - 제품: 지금은 MCP로 제공한다. Hermes는 개발·시연용 MCP 클라이언트이며 독립 사용자 클라이언트를 만들지 않는다.
@@ -46,8 +177,52 @@ Hermes의 개발·시연 모델은 Solar Pro4다. 백엔드의 AI 호출 설정�
 | 성공/업무 결과 | HTTP 200 + status로 분기 |
 | 전송·검증·장애 | HTTP 4xx/5xx + status=error |
 | 인증 | 이 초안은 사용자 계정 API를 정의하지 않는다. 공개 배포의 접근 제어·호출 제한은 별도 확인한다. 설정 예제나 사용자 대화에 고정 비밀키를 노출하지 않는다. |
+| Idempotency-Key | 문자열. 상태 변경 요청에 MCP가 생성해 전달하는 UUID v4 표준 문자열(36자). 요청 헤더 `Idempotency-Key`로 전달하며, 응답 헤더에도 동일한 값을 반환한다. 응답 JSON envelope에는 중복 추가하지 않는다. 조회 전용 요청에는 불필요하며, 상태 변경 요청에서 누락되거나 형식이 잘못되면 422 VALIDATION_ERROR로 처리한다. 같은 key에 다른 요청이 이미 처리된 경우에는 409 IDEMPOTENCY_KEY_REUSED로 처리한다. |
 
 해석의 상대 날짜는 요청의 `reference_time`을 기준으로 계산한다. 실제 경로 계획·재탐색의 현재 시각은 **서버 시각**이다. 연동 계층이 시뮬레이션 시각을 보내 실제 운행 계산을 과거로 돌리는 기능은 제공하지 않는다.
+
+### Idempotency-Key 계약
+
+- 생성 주체: MCP 서버가 상태 변경 MCP 도구 호출 시작 시 UUID v4로 생성한다. 모델이나 사용자에게 입력받지 않는다.
+- 재사용 범위: 동일 MCP 호출 내부의 HTTP 재시도에서는 같은 키를 재사용한다. 새로운 논리적 사용자 동작에는 새 키를 생성한다.
+- 전달 방식: HTTP 요청 헤더 `Idempotency-Key`로 전달한다. 조회 전용 요청에는 불필요하며, 확인·선택·재탐색 결과 적용 등 상태 변경 요청에는 필수다.
+- 응답 반환: 백엔드는 응답 헤더에도 동일한 키를 반환한다. 응답 JSON envelope에는 같은 값을 중복 추가하지 않는다.
+- 형식 요구: UUID v4 표준 문자열 36자를 사용한다. 필수 요청에서 누락되거나 형식이 잘못되면 기존 VALIDATION_ERROR 계약에 따라 422로 처리한다.
+- 충돌 처리: 동일 key에 다른 요청이 이미 처리된 경우에는 HTTP 409, error.code `IDEMPOTENCY_KEY_REUSED`, message `Idempotency key was already used for a different request.`, retryable false로 처리한다. 클라이언트는 같은 키로 다른 요청을 재시도하지 않으며, 새 논리적 동작이면 새 키를 생성한다.
+
+### payload hash 계약
+
+- hash 범위: HTTP method, 정규화된 API path, conversation_id, expected revision, 상태 변경에 영향을 주는 전체 JSON body를 포함한다.
+- 제외: Idempotency-Key 자체, 서버 생성 request_id/server_time, tracing 헤더, 전송 시각 등 비즈니스 의미가 없는 값은 hash에서 제외한다.
+- canonicalization: JSON은 UTF-8, key 정렬, 불필요한 공백 제거 방식으로 canonicalize한 뒤 SHA-256을 사용한다.
+- body 책임: MCP는 최초 요청 body와 expected revision을 보관한다. 같은 논리적 요청 재시도 시 그대로 재전송하며, 재시도 과정에서 현재 시각이나 revision을 새 값으로 바꾸지 않는다.
+- 동일성 판단: 백엔드 canonicalization은 JSON 객체 키 순서와 공백 차이만 흡수한다. 배열 순서, null과 필드 생략, 값 변경은 동일하다고 간주하지 않는다. user_confirmed 등 일부 필드만 선택적으로 hash하지 않는다.
+
+### 동일 key 우선순위
+
+- 유효한 conversation에서 이미 성공한 동일 key·동일 payload 재요청은 stale revision 검사보다 먼저 처리한다. 상태를 다시 변경하지 않고 저장된 응답을 반환한다.
+- 단, conversation이 만료됐다면 과거 성공 응답을 복원하지 않고 410 CONVERSATION_EXPIRED로 처리한다.
+- 상태 변경과 idempotency 결과 기록은 같은 DB 트랜잭션으로 커밋한다.
+
+### 대화 상태 계약의 원칙
+
+- 최초 요청의 conversation_id는 선택 사항이며, 없으면 백엔드가 생성한다.
+- 백엔드는 관련 응답 meta에 conversation_id, revision, expires_at을 반환한다.
+- 이후 확인·선택·재탐색 요청은 conversation_id와 클라이언트가 마지막으로 받은 revision을 전달한다.
+- 상태 변경 성공 시 revision이 증가한다.
+- 오래된 revision은 409 CONVERSATION_VERSION_CONFLICT로 처리한다.
+- 없거나 만료된 대화는 410 CONVERSATION_EXPIRED로 처리한다.
+- API 비밀키나 사용자 계정 정보는 이 계약에 포함하지 않는다.
+
+### 재시도 책임
+
+- MCP는 네트워크 연결 실패, timeout, 또는 계약상 retryable=true인 HTTP 502/503/504에 한해 최초 호출 후 최대 1회 자동 재시도할 수 있다.
+- MCP 기본 재시도 정책은 자동 재시도 최대 1회, 대기 500ms로 한다. 새 인프라나 사용자 설정 기능을 추가하지 않는다.
+- MCP는 같은 Idempotency-Key와 같은 body로 재시도하며, 재시도 과정에서 현재 시각이나 revision을 새 값으로 바꾸지 않는다.
+- 해석 가능한 오류 응답이 retryable=false이면 HTTP 상태만 보고 재시도하지 않는다.
+- 409, 410, 검증 실패, invalid JSON/invalid response는 자동 재시도하지 않는다.
+- 백엔드는 workflow 수준의 자동 재시도를 하지 않으며, provider 호출을 DB 트랜잭션 내부에 포함하지 않는다.
+
 
 ## 3. API 목록
 
@@ -86,6 +261,9 @@ Hermes의 개발·시연 모델은 Solar Pro4다. 백엔드의 AI 호출 설정�
 
 `is_demo`는 클라이언트 요청 옵션이 아니다. 별도 개발/시연 환경에서만 true 결과를 반환한다. 실제 데이터 조회 실패 시 운영 서버가 임의로 Demo 결과로 전환해서는 안 된다.
 
+
+
+상태 변경 응답의 응답 헤더 `Idempotency-Key`는 요청 시 전달받은 값과 동일하며, 응답 JSON envelope에는 Idempotency-Key를 중복 추가하지 않는다.
 ### error
 
 | 필드 | 타입 | 의미 |
@@ -746,6 +924,14 @@ Comparison은 다음 필드다.
 | 502 | error | UPSTREAM_RESPONSE_INVALID | 제공처·모델 결과 검증 실패. 잘못된 경로·시간을 표시하지 않음 |
 | 504 | error | UPSTREAM_TIMEOUT | 외부 요청 시간 초과. 재시도 안내 |
 | 500 | error | INTERNAL_ERROR | 일반 오류 안내와 request_id 제공 |
+| 404 | error | CONVERSATION_NOT_FOUND | 존재한 적 없는 conversation_id로 요청함. 새 대화로 다시 시작한다. |
+| 409 | error | CONVERSATION_VERSION_CONFLICT | 전달한 revision이 서버의 현재 revision과 다르다. 최신 상태를 다시 받아 재시도해야 한다. |
+| 409 | error | IDEMPOTENCY_KEY_REUSED | 같은 Idempotency-Key로 다른 요청이 이미 처리됐다. 같은 키로 다른 요청을 재시도하지 않는다. |
+| 410 | error | CONVERSATION_EXPIRED | conversation이 만료됐다. 새 대화로 다시 시작한다. |
+| 410 | error | CANDIDATE_SET_EXPIRED | conversation은 유효하지만 후보 집합이 만료됐다. 기존 확인 조건으로 새 계획을 요청한다. |
+
+상태 관련 오류는 CONVERSATION_NOT_FOUND, CONVERSATION_EXPIRED, CANDIDATE_SET_EXPIRED, CONVERSATION_VERSION_CONFLICT, IDEMPOTENCY_KEY_REUSED로 구분한다.
+
 
 최소 서버에서 위 오류 코드가 발생하는 지점을 명시적으로 매핑한다. 존재하지 않는 경로·메서드도 JSON envelope를 유지하며 각각 404 NOT_FOUND, 405 METHOD_NOT_ALLOWED를 반환한다.
 
@@ -791,6 +977,43 @@ unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한
 
 문맥·확인·선택 상태의 실제 저장 위치와 수명은 구현 전에 공동 합의한다. 서버가 plan_id로 DB 복원을 수행한다고 가정하지 않는다. 과거의 Local Journey 영구 저장·상태 버튼·notification_id 모델은 현재 MCP 필수 계약이 아니다.
 
+
+
+### tombstone 생성 충돌 처리
+
+tombstone은 24시간 유지 후 hard delete한다. 정리는 백엔드 시작 시 한 번, 실행 중 주기적으로 수행하며, 요청 시 만료가 발견되면 cleanup 주기를 기다리지 않고 즉시 tombstone 처리한다. tombstone 전환으로 사용자 revision은 증가시키지 않고 마지막 revision을 유지한다.
+
+- 동일 conversation_id의 만료 처리는 멱등하게 수행한다.
+- 가능하면 기존 conversation 행을 조건부 UPDATE하여 tombstone으로 전환한다.
+- 별도 테이블을 사용하는 경우 UNIQUE 제약과 ON CONFLICT DO NOTHING을 사용한다.
+- 원본 payload 제거와 tombstone 기록은 같은 DB 트랜잭션으로 처리한다.
+- 충돌 후 해당 tombstone이 존재함을 확인하면 동일하게 410 CONVERSATION_EXPIRED로 응답한다.
+- 기존 expired_at을 재설정하거나 tombstone 보존 기간을 연장하지 않는다.
+- 중복 키 이외의 DB 오류는 무시하거나 410으로 감추지 않는다.
+- hard delete 이후에는 404 CONVERSATION_NOT_FOUND를 반환하고, 과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.
+
+존재한 적 없는 conversation과 hard delete된 conversation은 모두 404 CONVERSATION_NOT_FOUND로 처리한다.
+과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.
+
+이 문단은 provider 호출 순서의 5단계 절차를 정의한다.
+
+### provider 호출 순서와 상태 변경 경계
+
+provider가 필요한 상태 변경은 다음 순서를 따른다.
+
+1. conversation 유효성, 입력, idempotency 기록, revision을 확인한다.
+2. DB 쓰기 트랜잭션 밖에서 provider를 호출한다.
+3. provider 성공 결과를 검증한다.
+4. 짧은 DB 트랜잭션에서 만료 여부, idempotency 기록, revision을 다시 확인한다.
+5. domain 상태 변경 + revision 증가 + idempotency 성공 결과를 원자적으로 커밋한다.
+
+동시 요청이 먼저 같은 key로 완료했다면 저장된 응답을 반환한다.
+다른 요청 때문에 revision이 바뀌었다면 409 CONVERSATION_VERSION_CONFLICT를 반환하고 provider 결과는 적용하지 않는다.
+그 사이 conversation이 만료됐다면 410 CONVERSATION_EXPIRED로 처리한다.
+
+provider 호출이 필요 없는 상태 변경은 DB 트랜잭션 안에서 검증과 커밋을 수행한다.
+
+provider 실패는 domain 상태·revision·updated_at·TTL을 갱신하지 않는다. 백엔드는 workflow 수준의 자동 재시도를 하지 않으며, provider 호출을 DB 트랜잭션 내부에 포함하지 않는다.
 ## 12. 시간 초과·재시도·중복 요청
 
 - 서버 처리 제한 초안: health/capabilities 3초, places 10초, interpret/plan/replan 25초.
@@ -863,3 +1086,20 @@ unavailable는 서버 장애와 달리 요청 조건 또는 데이터 지원 한
 - 호출 제한과 제공처별 최신성 기준.
 
 미확정 값을 실제 지원 기능처럼 하드코딩하지 않는다. capabilities에서 검증된 상태를 반환하고 불가능한 요청은 정의한 불가 사유로 응답한다.
+
+
+### tombstone 충돌 처리
+
+- tombstone은 24시간 유지 후 hard delete한다. 정리는 백엔드 시작 시 한 번, 실행 중 주기적으로 수행하며, 요청 시 만료가 발견되면 cleanup 주기를 기다리지 않고 즉시 tombstone 처리한다.
+- tombstone 전환으로 사용자 revision은 증가시키지 않고 마지막 revision을 유지한다.
+- 동일 conversation_id의 만료 처리는 멱등하게 수행한다.
+- 가능하면 기존 conversation 행을 조건부 UPDATE하여 tombstone으로 전환한다.
+- 별도 테이블을 사용하는 경우 UNIQUE 제약과 ON CONFLICT DO NOTHING을 사용한다.
+- 원본 payload 제거와 tombstone 기록은 같은 DB 트랜잭션으로 처리한다.
+- 충돌 후 해당 tombstone이 존재함을 확인하면 동일하게 410 CONVERSATION_EXPIRED로 응답한다.
+- 기존 expired_at을 재설정하거나 tombstone 보존 기간을 연장하지 않는다.
+- 중복 키 이외의 DB 오류는 무시하거나 410으로 감추지 않는다.
+- hard delete 이후에는 404 CONVERSATION_NOT_FOUND를 반환하고, 과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.
+
+존재한 적 없는 conversation과 hard delete된 conversation은 모두 404 CONVERSATION_NOT_FOUND로 처리한다.
+과거 존재 여부를 구분하기 위한 별도 이력은 보관하지 않는다.

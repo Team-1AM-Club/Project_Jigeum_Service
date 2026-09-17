@@ -1,0 +1,672 @@
+diff --git a/backend/tests/unit/test_transit_domain.py b/backend/tests/unit/test_transit_domain.py
+new file mode 100644
+--- /dev/null
++++ b/backend/tests/unit/test_transit_domain.py
+@@ -0,0 +1,292 @@
++"""교통 ID·좌표·근거·시간 연결을 합성 자료로 검증한다."""
++
++from datetime import date, datetime, timedelta, timezone
++
++import pytest
++from pydantic import ValidationError
++
++from app.domain.transit import (
++    Coordinate,
++    Evidence,
++    JourneyCandidate,
++    JourneyLeg,
++    ProviderIdentifier,
++    RoutePattern,
++    ScheduledCall,
++    StopOccurrence,
++    TransferLink,
++    TransitObservation,
++    TransitPlace,
++)
++from app.services.provider_interfaces import ProviderResult
++
++
++def moment(minutes=0):
++    return datetime(
++        2026, 9, 16, 18, 0, tzinfo=timezone(timedelta(hours=9))
++    ) + timedelta(minutes=minutes)
++
++
++def evidence(**changes):
++    return Evidence(
++        provider="synthetic",
++        service="fixture",
++        operation="fixture",
++        basis="demo",
++        retrieved_at=moment(),
++        **changes,
++    )
++
++
++def leg(**changes):
++    values = {
++        "leg_id": "ride",
++        "mode": "subway",
++        "origin_place_id": "a",
++        "destination_place_id": "b",
++        "departure_at": moment(10),
++        "arrival_at": moment(50),
++        "evidence": evidence(),
++    }
++    values.update(changes)
++    return JourneyLeg(**values)
++
++
++def test_provider_ids_preserve_namespace_and_leading_zero():
++    station = ProviderIdentifier(namespace="STATION_CD", value="0012")
++    external = ProviderIdentifier(namespace="FR_CODE", value="0012")
++    assert station.value == "0012"
++    assert station != external
++    with pytest.raises(ValidationError):
++        ProviderIdentifier(namespace="STATION_CD", value=12)
++
++
++@pytest.mark.parametrize("state", ["documented", "configured", "real_call_verified"])
++def test_unvalidated_realtime_state_is_never_usable(state):
++    source = Evidence(
++        provider="synthetic",
++        service="fixture",
++        operation="fixture",
++        basis="realtime",
++        basis_at=moment(),
++        retrieved_at=moment(),
++        usage_rules_verified=True,
++        verification_state=state,
++    )
++    assert source.realtime_usable is False
++
++
++def test_missing_coordinate_is_unknown_and_never_zero_filled():
++    place = TransitPlace(
++        place_id="a",
++        mode="subway",
++        name="합성역",
++        provider_ids=[ProviderIdentifier(namespace="STATION_CD", value="0012")],
++        evidence=evidence(),
++    )
++    assert place.coordinate is None
++    with pytest.raises(ValidationError):
++        Coordinate(system="WGS84", x=127)
++
++
++def test_coordinate_requires_verified_system_for_public_point():
++    assert Coordinate(system="WGS84", x=127, y=37.5).wgs84() == (37.5, 127)
++    with pytest.raises(ValueError):
++        Coordinate(system="GRS80", x=127, y=37.5).wgs84()
++    with pytest.raises(ValidationError):
++        Coordinate(system="WGS84", x=127, y=100)
++
++
++def test_circular_route_preserves_each_stop_occurrence():
++    stops = [
++        StopOccurrence(place_id="a", sequence=1),
++        StopOccurrence(place_id="b", sequence=2),
++        StopOccurrence(place_id="a", sequence=3),
++    ]
++    route = RoutePattern(
++        route_id=ProviderIdentifier(namespace="busRouteId", value="001"),
++        mode="bus",
++        direction="합성방향",
++        occurrences=stops,
++        evidence=evidence(),
++    )
++    assert len(route.occurrences) == 3
++    with pytest.raises(ValidationError):
++        route.model_copy().model_validate(
++            {**route.model_dump(), "occurrences": [stops[0], stops[0]]}
++        )
++
++
++@pytest.mark.parametrize("field", ["basis_at", "retrieved_at"])
++def test_evidence_rejects_naive_timestamps(field):
++    values = {
++        "provider": "synthetic",
++        "service": "fixture",
++        "operation": "fixture",
++        "basis": "realtime",
++        "retrieved_at": moment(),
++    }
++    values[field] = moment().replace(tzinfo=None)
++    with pytest.raises(ValidationError):
++        Evidence(**values)
++
++
++def test_static_reference_date_never_becomes_basis_timestamp():
++    source = Evidence(
++        provider="synthetic",
++        service="fixture",
++        operation="fixture",
++        basis="schedule",
++        reference_date=date(2026, 9, 1),
++        retrieved_at=moment(),
++    )
++    assert source.basis_at is None
++    assert source.reference_date == date(2026, 9, 1)
++
++
++def test_realtime_without_basis_or_rules_is_not_usable():
++    values = {
++        "provider": "synthetic",
++        "service": "fixture",
++        "operation": "fixture",
++        "basis": "realtime",
++        "retrieved_at": moment(),
++    }
++    assert Evidence(**values).realtime_usable is False
++    assert Evidence(**values, basis_at=moment()).realtime_usable is False
++    assert (
++        Evidence(
++            **values,
++            basis_at=moment(),
++            usage_rules_verified=True,
++            verification_state="normalized",
++        ).realtime_usable
++        is True
++    )
++    assert (
++        Evidence(
++            **values, basis_at=moment(1), usage_rules_verified=True
++        ).realtime_usable
++        is False
++    )
++
++
++def test_observation_keeps_eta_units_and_position_cannot_invent_prediction():
++    observation = TransitObservation(
++        kind="arrival_prediction",
++        occurrence=StopOccurrence(place_id="a", sequence=1),
++        raw_eta="120",
++        eta_unit="seconds",
++        predicted_arrival_at=moment(2),
++        evidence=evidence(),
++    )
++    assert observation.raw_eta == "120"
++    assert observation.eta_unit == "seconds"
++    with pytest.raises(ValidationError):
++        TransitObservation(
++            kind="position",
++            occurrence=observation.occurrence,
++            predicted_arrival_at=moment(2),
++            evidence=evidence(),
++        )
++
++
++def test_past_prediction_is_not_clamped_to_now():
++    source = Evidence(
++        provider="synthetic",
++        service="fixture",
++        operation="fixture",
++        basis="realtime",
++        retrieved_at=moment(),
++        basis_at=moment(),
++        usage_rules_verified=True,
++    )
++    observation = TransitObservation(
++        kind="arrival_prediction",
++        occurrence=StopOccurrence(place_id="a", sequence=1),
++        predicted_arrival_at=moment(-1),
++        evidence=source,
++    )
++    assert observation.usable_for_current_operation is False
++    assert observation.predicted_arrival_at == moment(-1)
++
++
++def test_scheduled_call_keeps_service_date_and_actual_next_day():
++    call = ScheduledCall(
++        occurrence=StopOccurrence(place_id="a", sequence=1),
++        service_id=ProviderIdentifier(namespace="train", value="0001"),
++        direction="합성방향",
++        headsign="합성종착역",
++        service_date=date(2026, 9, 16),
++        departure_at=datetime(2026, 9, 17, 0, 5, tzinfo=moment().tzinfo),
++        raw_departure_time="24:05:00",
++        evidence=evidence(),
++    )
++    assert call.service_date == date(2026, 9, 16)
++    assert call.departure_at.date() == date(2026, 9, 17)
++    assert call.raw_departure_time == "24:05:00"
++
++
++def test_transfer_link_requires_actual_route_and_minutes():
++    with pytest.raises(ValidationError):
++        TransferLink(origin_place_id="a", destination_place_id="b", evidence=evidence())
++    link = TransferLink(
++        origin_place_id="a",
++        destination_place_id="b",
++        connection_id="synthetic-walk",
++        minimum_minutes=3,
++        evidence=evidence(),
++    )
++    assert link.minimum_minutes == 3
++
++
++def test_candidate_buffer_once_and_total_matches_time_and_legs():
++    buffer_leg = leg(
++        leg_id="buffer",
++        mode="wait",
++        destination_place_id="a",
++        departure_at=moment(5),
++        arrival_at=moment(10),
++        wait_reason="safety_buffer",
++    )
++    candidate = JourneyCandidate(option_id="synthetic", legs=[buffer_leg, leg()])
++    assert candidate.total_duration_minutes == 45
++    assert candidate.recommended_leave_at == moment(5)
++    assert candidate.estimated_arrival_at == moment(50)
++    assert candidate.is_demo is True
++    with pytest.raises(ValidationError):
++        JourneyCandidate(
++            option_id="synthetic", legs=[buffer_leg, leg(departure_at=moment(11))]
++        )
++    with pytest.raises(ValidationError):
++        JourneyCandidate(
++            option_id="synthetic", legs=[buffer_leg, leg(origin_place_id="elsewhere")]
++        )
++
++
++def test_missing_or_duplicated_buffer_cannot_be_a_valid_candidate():
++    with pytest.raises(ValidationError):
++        JourneyCandidate(option_id="synthetic", legs=[leg()])
++    buffer_leg = leg(
++        leg_id="buffer",
++        mode="wait",
++        destination_place_id="a",
++        departure_at=moment(),
++        arrival_at=moment(5),
++        wait_reason="safety_buffer",
++    )
++    second = leg(
++        leg_id="buffer2",
++        mode="wait",
++        destination_place_id="a",
++        departure_at=moment(5),
++        arrival_at=moment(10),
++        wait_reason="safety_buffer",
++    )
++    with pytest.raises(ValidationError):
++        JourneyCandidate(option_id="synthetic", legs=[buffer_leg, second, leg()])
++
++
++def test_normal_empty_provider_result_is_distinct_from_failure():
++    assert ProviderResult(ok=True, data=[]).ok is True
++    assert ProviderResult(ok=False, error_code="PROVIDER_UNAVAILABLE").ok is False
+diff --git a/backend/tests/unit/test_transit_settings.py b/backend/tests/unit/test_transit_settings.py
+new file mode 100644
+--- /dev/null
++++ b/backend/tests/unit/test_transit_settings.py
+@@ -0,0 +1,92 @@
++"""교통 자격증명의 명시적 로드·환경변수 우선·비표시 계약."""
++
++from pathlib import Path
++
++import pytest
++from pydantic import SecretStr
++
++from app.config import Settings
++
++KEY_NAMES = (
++    "SEOUL_SUBWAY_ARRIVAL_API_KEY",
++    "SEOUL_SUBWAY_POSITION_API_KEY",
++    "SEOUL_SUBWAY_STATIONS_API_KEY",
++    "SEOUL_SUBWAY_TIMETABLE_API_KEY",
++    "SEOUL_SUBWAY_LAST_TRAIN_API_KEY",
++    "SEOUL_SUBWAY_PATH_API_KEY",
++    "SEOUL_BUS_STATIONS_API_KEY",
++    "SEOUL_BUS_ROUTES_API_KEY",
++    "SEOUL_BUS_POSITIONS_API_KEY",
++    "SEOUL_BUS_ARRIVALS_API_KEY",
++)
++SYNTHETIC_KEY = "synthetic-transit-key-for-tests"
++
++
++@pytest.fixture(autouse=True)
++def synthetic_environment(monkeypatch):
++    for name in KEY_NAMES:
++        monkeypatch.delenv(name, raising=False)
++    monkeypatch.setenv("SECRET_KEY", "synthetic-app-key")
++
++
++@pytest.mark.parametrize("name", KEY_NAMES)
++def test_server_keys_are_secret_and_not_serialized(name, monkeypatch):
++    monkeypatch.setenv(name, SYNTHETIC_KEY)
++    settings = Settings(_env_file=None)
++    key = getattr(settings, name.lower(), None)
++    assert isinstance(key, SecretStr), "서비스별 SecretStr 설정이 필요합니다."
++    assert key.get_secret_value() == SYNTHETIC_KEY
++    assert SYNTHETIC_KEY not in repr(settings)
++    assert SYNTHETIC_KEY not in settings.model_dump_json()
++
++
++def test_import_settings_does_not_implicitly_read_transit_file(tmp_path, monkeypatch):
++    monkeypatch.chdir(tmp_path)
++    (tmp_path / ".env.transit.local").write_text(
++        f"SEOUL_SUBWAY_PATH_API_KEY={SYNTHETIC_KEY}\n", encoding="utf-8"
++    )
++    settings = Settings(_env_file=None)
++    key = getattr(settings, "seoul_subway_path_api_key", None)
++    assert isinstance(key, SecretStr)
++    assert key.get_secret_value() == ""
++
++
++def test_explicit_transit_file_and_existing_env_are_loaded(tmp_path, monkeypatch):
++    monkeypatch.chdir(tmp_path)
++    (tmp_path / ".env").write_text(
++        "SECRET_KEY=synthetic-existing-app-key\nAPI_VERSION=test-v1\n",
++        encoding="utf-8",
++    )
++    transit = tmp_path / "transit.local"
++    transit.write_text(f"SEOUL_SUBWAY_PATH_API_KEY={SYNTHETIC_KEY}\n", encoding="utf-8")
++    assert hasattr(Settings, "from_transit_file"), "명시적 로드 경계가 필요합니다."
++    settings = Settings.from_transit_file(transit)
++    assert settings.seoul_subway_path_api_key.get_secret_value() == SYNTHETIC_KEY
++    assert settings.api_version == "test-v1"
++
++
++def test_server_environment_wins_over_local_file(tmp_path, monkeypatch):
++    transit = tmp_path / "transit.local"
++    transit.write_text(
++        "SEOUL_BUS_ARRIVALS_API_KEY=synthetic-local-key\n", encoding="utf-8"
++    )
++    monkeypatch.setenv("SEOUL_BUS_ARRIVALS_API_KEY", "synthetic-server-key")
++    assert hasattr(Settings, "from_transit_file")
++    settings = Settings.from_transit_file(transit, env_file=None)
++    assert (
++        settings.seoul_bus_arrivals_api_key.get_secret_value() == "synthetic-server-key"
++    )
++    assert settings.seoul_bus_routes_api_key.get_secret_value() == ""
++
++
++def test_missing_individual_key_keeps_other_settings_available():
++    settings = Settings(_env_file=None)
++    assert isinstance(getattr(settings, "seoul_bus_routes_api_key", None), SecretStr)
++    assert settings.seoul_bus_routes_api_key.get_secret_value() == ""
++    assert settings.api_version == "v1"
++
++
++def test_relative_transit_file_is_rejected():
++    assert hasattr(Settings, "from_transit_file")
++    with pytest.raises(ValueError, match="절대 경로"):
++        Settings.from_transit_file(Path("transit.local"), env_file=None)
+diff --git a/backend/tests/unit/test_verify_transit.py b/backend/tests/unit/test_verify_transit.py
+new file mode 100644
+--- /dev/null
++++ b/backend/tests/unit/test_verify_transit.py
+@@ -0,0 +1,273 @@
++"""운영자 검증은 합성 키와 MockTransport로 먼저 검증한다."""
++
++import io
++import json
++import logging
++import subprocess
++import sys
++from contextlib import redirect_stderr, redirect_stdout
++from urllib.parse import quote
++
++import httpx
++import pytest
++
++from app.config import Settings
++from app.integrations.verify_transit import CATALOG, cli_main, verify_service
++
++SENTINEL = "synthetic-secret/key+and=encoded"
++
++
++def settings():
++    return Settings(
++        _env_file=None,
++        secret_key="synthetic",
++        **{spec.key_field: SENTINEL for spec in CATALOG.values()},
++    )
++
++
++def document(alias):
++    spec = CATALOG[alias]
++    if spec.family == "bus":
++        return "<ServiceResult><msgHeader><headerCd>0</headerCd></msgHeader><msgBody><itemList><busRouteId>100100118</busRouteId></itemList></msgBody></ServiceResult>"
++    if spec.family == "path":
++        return "<document><header><resultCode>00</resultCode></header><body><paths><path><reqHr>120</reqHr></path></paths></body></document>"
++    return f"<{spec.operation}><RESULT><CODE>INFO-000</CODE></RESULT><row><STATION_CD>0309</STATION_CD></row></{spec.operation}>"
++
++
++def test_requires_live_before_loading_keys(capsys):
++    def must_not_load(*args, **kwargs):
++        pytest.fail("--live 없이 설정을 읽으면 안 됩니다.")
++
++    assert (
++        cli_main(["--service", "subway-stations"], settings_loader=must_not_load) == 2
++    )
++    assert json.loads(capsys.readouterr().out)["state"] == "requires_live"
++
++
++def test_fresh_module_import_without_live_never_imports_settings():
++    program = """
++import sys
++from importlib.abc import MetaPathFinder
++class BlockSettings(MetaPathFinder):
++    def find_spec(self, fullname, path=None, target=None):
++        if fullname == "app.config":
++            raise AssertionError("Settings imported before --live")
++sys.meta_path.insert(0, BlockSettings())
++from app.integrations.verify_transit import cli_main
++assert cli_main(["--service", "subway-stations"]) == 2
++"""
++    result = subprocess.run(
++        [sys.executable, "-c", program], capture_output=True, text=True, check=False
++    )
++    assert result.returncode == 0, result.stderr
++    assert json.loads(result.stdout)["state"] == "requires_live"
++
++
++@pytest.mark.parametrize("alias", list(CATALOG))
++@pytest.mark.asyncio
++async def test_each_service_uses_its_fixed_host_and_separate_key(alias):
++    calls = []
++
++    def respond(request):
++        calls.append(request)
++        return httpx.Response(200, text=document(alias))
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
++        report = await verify_service(alias, settings(), http_client=http)
++    assert report["state"] == "real_call_verified"
++    assert report["row_count"] == 1
++    assert report["verified_for_planning"] is False
++    assert len(calls) == 1
++    assert calls[0].url.host in {
++        "openapi.seoul.go.kr",
++        "swopenapi.seoul.go.kr",
++        "ws.bus.go.kr",
++    }
++    if CATALOG[alias].family == "bus":
++        assert calls[0].url.params["serviceKey"] == SENTINEL
++        assert "%252F" not in str(calls[0].url)
++    else:
++        assert quote(SENTINEL, safe="") in str(calls[0].url)
++    assert SENTINEL not in json.dumps(report)
++
++
++@pytest.mark.asyncio
++async def test_missing_key_does_not_send_request():
++    calls = []
++    async with httpx.AsyncClient(
++        transport=httpx.MockTransport(lambda request: calls.append(request))
++    ) as http:
++        report = await verify_service(
++            "subway-stations",
++            Settings(_env_file=None, secret_key="synthetic"),
++            http_client=http,
++        )
++    assert report["state"] == "missing_key"
++    assert calls == []
++
++
++@pytest.mark.parametrize(
++    "alias", ["subway-timetable", "subway-last-train", "subway-path"]
++)
++@pytest.mark.asyncio
++async def test_auth_error_never_retries_or_swaps_keys(alias):
++    calls = []
++
++    def respond(request):
++        calls.append(request)
++        return httpx.Response(
++            200,
++            text="<RESULT><CODE>INFO-100</CODE><MESSAGE>"
++            + SENTINEL
++            + "</MESSAGE></RESULT>",
++        )
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
++        report = await verify_service(alias, settings(), http_client=http)
++    assert report["state"] == "authentication_failed"
++    assert len(calls) == 1
++    assert SENTINEL not in json.dumps(report)
++
++
++@pytest.mark.parametrize(
++    "failure", ["network", "xml", "business", "redirect", "unknown_header"]
++)
++@pytest.mark.asyncio
++async def test_output_and_debug_logs_never_expose_secret(failure, caplog):
++    calls = []
++
++    def respond(request):
++        calls.append(request)
++        if failure == "network":
++            raise httpx.ConnectError(SENTINEL + str(request.url), request=request)
++        if failure == "redirect":
++            return httpx.Response(
++                302, headers={"Location": "https://other.test/" + SENTINEL}
++            )
++        if failure == "xml":
++            return httpx.Response(200, text=SENTINEL)
++        code = SENTINEL if failure == "unknown_header" else "INFO-100"
++        return httpx.Response(
++            200,
++            text=f"<RESULT><CODE>{code}</CODE><MESSAGE>{SENTINEL}</MESSAGE></RESULT>",
++        )
++
++    caplog.set_level(logging.DEBUG)
++    async with httpx.AsyncClient(
++        transport=httpx.MockTransport(respond), follow_redirects=True
++    ) as http:
++        report = await verify_service("subway-timetable", settings(), http_client=http)
++    rendered = caplog.text + json.dumps(report)
++    assert SENTINEL not in rendered
++    assert quote(SENTINEL, safe="") not in rendered
++    assert "serviceKey=" not in rendered
++    assert report["state"] != "real_call_verified"
++    assert len(calls) <= 2
++
++
++@pytest.mark.parametrize(
++    "args",
++    [
++        ["--unknown", SENTINEL],
++        ["--service", SENTINEL, "--live"],
++        ["--service", "subway-stations", "--live", "--env-file", SENTINEL],
++    ],
++)
++def test_cli_argument_errors_never_echo_input(args):
++    output, errors = io.StringIO(), io.StringIO()
++    with redirect_stdout(output), redirect_stderr(errors):
++        code = cli_main(args, settings_loader=lambda *args, **kwargs: settings())
++    assert code == 2
++    assert SENTINEL not in output.getvalue() + errors.getvalue()
++
++
++def test_cli_settings_exception_is_safe():
++    def fail(*args, **kwargs):
++        raise ValueError(SENTINEL)
++
++    output, errors = io.StringIO(), io.StringIO()
++    with redirect_stdout(output), redirect_stderr(errors):
++        code = cli_main(
++            ["--service", "subway-stations", "--live"], settings_loader=fail
++        )
++    assert code == 2
++    assert SENTINEL not in output.getvalue() + errors.getvalue()
++
++
++@pytest.mark.asyncio
++async def test_unknown_service_fails_without_request_and_does_not_echo_value():
++    report = await verify_service(SENTINEL, settings())
++    assert report["state"] == "invalid_input"
++    assert SENTINEL not in json.dumps(report)
++
++
++@pytest.mark.asyncio
++async def test_known_empty_result_is_not_provider_failure():
++    async with httpx.AsyncClient(
++        transport=httpx.MockTransport(
++            lambda request: httpx.Response(
++                200, text="<RESULT><CODE>INFO-200</CODE></RESULT>"
++            )
++        )
++    ) as http:
++        report = await verify_service("subway-stations", settings(), http_client=http)
++    assert report["state"] == "empty"
++    assert report["row_count"] == 0
++
++
++@pytest.mark.asyncio
++async def test_unknown_business_diagnostics_never_echo_response(caplog):
++    caplog.set_level(logging.DEBUG)
++    body = f"<RESULT><CODE>{SENTINEL}</CODE><MESSAGE>{SENTINEL}</MESSAGE></RESULT>"
++    async with httpx.AsyncClient(
++        transport=httpx.MockTransport(lambda request: httpx.Response(200, text=body))
++    ) as http:
++        report = await verify_service("subway-stations", settings(), http_client=http)
++    assert report["response_shape"] == "business_result"
++    assert report["business_code"] == "unknown"
++    assert SENTINEL not in json.dumps(report) + caplog.text
++
++
++@pytest.mark.parametrize(
++    "alias, tag",
++    [
++        ("subway-arrivals", "realtimeArrivalList"),
++        ("subway-positions", "realtimePositionList"),
++    ],
++)
++@pytest.mark.asyncio
++async def test_realtime_xml_uses_error_message_and_service_list(alias, tag):
++    operation = CATALOG[alias].operation
++    body = f"<{operation}><errorMessage><code>INFO-000</code><status>200</status></errorMessage><{tag}><recptnDt>2026-09-16 23:00:00</recptnDt></{tag}></{operation}>"
++    async with httpx.AsyncClient(
++        transport=httpx.MockTransport(lambda request: httpx.Response(200, text=body))
++    ) as http:
++        report = await verify_service(alias, settings(), http_client=http)
++    assert report["state"] == "real_call_verified"
++    assert report["row_count"] == 1
++    assert report["verified_for_planning"] is False
++
++
++@pytest.mark.asyncio
++async def test_static_utf8_encoding_label_is_uncompressed_xml():
++    async with httpx.AsyncClient(
++        transport=httpx.MockTransport(
++            lambda request: httpx.Response(
++                200,
++                text=document("subway-stations"),
++                headers={"Content-Encoding": "UTF-8"},
++            )
++        )
++    ) as http:
++        report = await verify_service("subway-stations", settings(), http_client=http)
++    assert report["state"] == "real_call_verified"
++
++
++@pytest.mark.asyncio
++async def test_realtime_xml_result_uses_lowercase_code_and_rows():
++    body = "<realtimeStationArrival><RESULT><code>INFO-000</code></RESULT><row><recptnDt>2026-09-16 23:00:00</recptnDt></row></realtimeStationArrival>"
++    async with httpx.AsyncClient(
++        transport=httpx.MockTransport(lambda request: httpx.Response(200, text=body))
++    ) as http:
++        report = await verify_service("subway-arrivals", settings(), http_client=http)
++    assert report["state"] == "real_call_verified"

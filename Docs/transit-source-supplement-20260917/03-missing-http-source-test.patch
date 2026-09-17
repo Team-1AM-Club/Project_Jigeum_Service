@@ -1,0 +1,68 @@
+diff --git a/backend/tests/integration/test_confirmation_http.py b/backend/tests/integration/test_confirmation_http.py
+--- a/backend/tests/integration/test_confirmation_http.py
++++ b/backend/tests/integration/test_confirmation_http.py
+@@ -518,3 +518,64 @@
+     client, _ = http_state
+     response = post(client, "/mobility/interpret", {"natural_language": "   "})
+     assert response.status_code == 422
++
++def test_candidate_sources_survive_http_and_idempotent_replay(http_state, monkeypatch):
++    from unittest.mock import AsyncMock
++
++    from app.api.journeys import plan_service
++    from app.domain.transit import Evidence
++    from app.services.provider_interfaces import ProviderResult, RoutingProvider
++
++    client, _ = http_state
++    source = {
++        "provider": "synthetic",
++        "basis": "schedule",
++        "retrieved_at": "2026-09-16T18:00:00+09:00",
++        "service_date": "2026-09-16",
++    }
++    provider = AsyncMock(spec=RoutingProvider)
++    provider.search_options.return_value = ProviderResult(
++        ok=True,
++        data=[
++            {
++                "option_id": "synthetic-source",
++                "total_duration_minutes": 40,
++                "transport_mode": "subway",
++                "legs": [],
++                "sources": [source],
++            }
++        ],
++        evidence=(
++            Evidence.model_validate(
++                dict(
++                    source,
++                    service="synthetic-timetable",
++                    operation="synthetic-operation",
++                    revision="schedule-r2",
++                    reference_date="2026-09-01",
++                )
++            ),
++        ),
++    )
++    monkeypatch.setattr(plan_service, "routing_provider", provider)
++    trip = dict(TRIP, transport_modes=["subway"])
++    meta = draft(client, trip)
++    denied = post(client, "/journeys/plan", plan_body(meta, trip))
++    assert denied.json()["error"]["code"] == "USER_CONFIRMATION_REQUIRED"
++    provider.search_options.assert_not_awaited()
++    confirmation = confirm(client, meta, trip)
++    assert confirmation.status_code == 200
++    meta = confirmation.json()["meta"]
++    body = plan_body(meta, trip)
++    key = str(uuid.uuid4())
++    first = post(client, "/journeys/plan", body, key)
++    assert first.status_code == 200, first.text
++    candidate = first.json()["data"]["comparison"]["options"][0]
++    assert candidate["sources"] == [dict(source, basis_at=None)]
++    assert any(
++        warning["code"] == "SOURCE_REFERENCE" for warning in candidate["warnings"]
++    )
++    replay = post(client, "/journeys/plan", body, key)
++    assert replay.status_code == 200
++    assert replay.json() == first.json()
++    provider.search_options.assert_awaited_once()

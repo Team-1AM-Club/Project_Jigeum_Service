@@ -8,9 +8,9 @@
 
 Hermes + Upstage Solar Pro4를 개발과 시연에 사용한다. Hermes는 서비스가 연결되는 MCP 클라이언트이며, FastAPI는 MCP 도구를 지원하는 내부 계산 백엔드다. 다른 MCP 클라이언트의 호환성은 별도 검증이 필요하다.
 
-~~~text
+```text
 사용자 ↔ Hermes + Solar Pro4 ↔ 지금 MCP 서버 ↔ FastAPI ↔ 검증된 교통 데이터
-~~~
+```
 
 MVP는 로컬 stdio 연결부터 검증한다. 원격 제공 방식·접근 제어와 제출 요구 사항은 별도로 확인하며, 제품 형태를 다시 독립 클라이언트 형태를 선택하지 않는다.
 
@@ -41,8 +41,8 @@ Docs의 서비스 PRD·Agent 제안·4일 분업안도 MCP 제공 방향을 명�
 
 ## 두 사람의 분업
 
-- 본인: MCP 도구 5개, 기존 API 연결, 확인·선택 흐름, Hermes 설정·통합 검증·시연.
-- 친구: FastAPI, MainAgent·SubAgent·Skill, 모델·교통 데이터, 시간 계산, 재탐색, 테스트·배포.
+- 친구: MCP 도구 5개, 기존 API 연결, 확인·선택 흐름, Hermes 설정·통합 검증·시연.
+- 본인: FastAPI, MainAgent·SubAgent·Skill, 모델·교통 데이터, 시간 계산, 재탐색, 테스트·배포.
 - 공동: API·MCP 계약, 확인·문맥·선택 상태의 소유권, 지원 범위, Spec Kit, 제출 자료.
 - 백엔드는 FastAPI·Docker·Cloud Run을 유지한다. 교통 API 키는 저장소에 포함하지 않는다.
 
